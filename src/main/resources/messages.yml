@@ -1,9 +1,4 @@
-# ================================================================
-#  RealisticDuels - messages
-#  Uses MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
-# ================================================================
-
-prefix: "<gray>[<gold>Duels<gray>]</gray> "
+prefix: "<gray>[<gold>Duels<gray>] </gray>"
 
 general:
   no-permission: "<red>You don't have permission to do that."
@@ -11,3 +6,45 @@ general:
   unknown-command: "<red>Unknown command. Try <white>/duel help</white>."
   reload-success: "<green>Configuration reloaded successfully."
   reload-failed: "<red>Reload failed. Check the console for details."
+  help:
+    - "<gold><bold>RealisticDuels</bold></gold>"
+    - "<gray>/duel <player> <dark_gray>- <white>send a duel request"
+    - "<gray>/duel accept <dark_gray>- <white>accept the pending request"
+    - "<gray>/duel deny <dark_gray>- <white>deny the pending request"
+    - "<gray>/duel forfeit <dark_gray>- <white>forfeit your active duel"
+
+duel:
+  self: "<red>You can't duel yourself."
+  target-offline: "<red>That player is not online."
+  sender-busy: "<red>You already have a pending request or an active duel."
+  target-busy: "<red>That player is already busy with another duel or request."
+  cooldown: "<red>Wait <white><seconds>s</white> before sending another request."
+  request-sent: "<green>Duel request sent to <white><target></white>."
+  request-received: "<yellow><sender></yellow> <gray>wants to duel you! <green><click:run_command:'/duel accept'>[ACCEPT]</click></green> <red><click:run_command:'/duel deny'>[DENY]</click></red>"
+  request-expired-sender: "<red>Your duel request to <white><target></white> expired."
+  request-expired-target: "<gray>The duel request from <white><sender></white> expired."
+  request-cancelled: "<yellow>The duel request was cancelled."
+  no-incoming: "<red>You have no incoming duel request."
+  accepted-sender: "<green><white><target></white> accepted your duel request!"
+  accepted-target: "<green>You accepted the duel request."
+  denied-sender: "<red><white><target></white> denied your duel request."
+  denied-target: "<yellow>You denied the duel request."
+  started: "<gold>The duel has started! Good luck."
+  ended-win: "<green>You won the duel!"
+  ended-loss: "<red>You lost the duel."
+  ended-cancelled: "<yellow>The duel has been cancelled."
+  not-in-duel: "<red>You're not in an active duel."
+
+arena:
+  usage: "<gray>Usage: <white>/duel arena <list|create|setspawn|delete|reload>"
+  no-world: "<red>Duel world is not available. Check the console."
+  already-exists: "<red>Arena <white><id></white> already exists."
+  not-found: "<red>Arena <white><id></white> not found."
+  created: "<green>Arena <white><id></white> created. Use <white>/duel arena setspawn <id> 1|2</white> to refine spawns."
+  deleted: "<yellow>Arena <white><id></white> deleted."
+  spawn-set: "<green>Spawn <white><which></white> for arena <white><id></white> updated."
+  reloaded: "<green>Arenas reloaded from config."
+  list-empty: "<yellow>No arenas configured."
+  list-header: "<gold>Arenas <gray>(<white><count></white>)"
+  list-entry: "<gray>- <white><id></white> <dark_gray>|</dark_gray> <gray>world: <white><world></white> <dark_gray>|</dark_gray> <gray>state: <white><state></white>"
+  no-arena-available: "<red>No free arena available. Try again later."
