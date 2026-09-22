@@ -1,0 +1,13 @@
+# ================================================================
+#  RealisticDuels - messages
+#  Uses MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
+# ================================================================
+
+prefix: "<gray>[<gold>Duels<gray>]</gray> "
+
+general:
+  no-permission: "<red>You don't have permission to do that."
+  player-only: "<red>Only players can run this command."
+  unknown-command: "<red>Unknown command. Try <white>/duel help</white>."
+  reload-success: "<green>Configuration reloaded successfully."
+  reload-failed: "<red>Reload failed. Check the console for details."

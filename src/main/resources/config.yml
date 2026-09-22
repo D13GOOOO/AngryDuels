@@ -1,0 +1,40 @@
+# ================================================================
+#  RealisticDuels - configuration
+#  Reload in-game with /duels reload (available from Phase 1)
+# ================================================================
+
+settings:
+  # Verbose logging for debugging. Keep false in production.
+  debug: false
+  # Language file to use (messages-<lang>.yml later).
+  language: en
+
+duel:
+  # Seconds the target has to accept/deny a request.
+  request-timeout-seconds: 30
+  # Seconds of countdown before PvP is enabled.
+  countdown-seconds: 5
+  # Cooldown between outgoing requests, in seconds.
+  cooldown-seconds: 10
+  # Block duels between players on the same IP (anti-alt abuse).
+  prevent-same-ip: false
+
+world:
+  # Name of the dedicated duel world.
+  name: duels_world
+  # If true, the plugin creates the world on startup if missing.
+  auto-create: true
+  # Allowed generators: void, normal
+  generator: void
+
+storage:
+  # mysql is the only supported backend for now.
+  type: mysql
+  mysql:
+    host: localhost
+    port: 3306
+    database: duels
+    username: root
+    password: ''
+    pool-size: 10
+    use-ssl: false

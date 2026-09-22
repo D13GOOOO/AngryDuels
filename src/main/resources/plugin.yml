@@ -1,0 +1,21 @@
+name: RealisticDuels
+version: '${version}'
+main: com.angryguyy.duels.DuelsPlugin
+api-version: '1.21'
+authors: [ angryguyy ]
+description: Realistic duel system for Paper servers
+website: https://github.com/angryguyy/RealisticDuels
+
+commands:
+  duels:
+    description: Main duels command
+    usage: /duels <subcommand>
+    aliases: [ duel, d ]
+
+permissions:
+  duels.use:
+    description: Base permission to use duel commands
+    default: true
+  duels.admin:
+    description: Access to administrative commands
+    default: op
