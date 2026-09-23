@@ -1,0 +1,185 @@
+# ================================================================
+#  AngryDuels - kits
+#
+#  Slot layout (native Bukkit slots):
+#    0-8    hotbar
+#    9-35   main inventory (27 slots)
+#    36     boots
+#    37     leggings
+#    38     chestplate
+#    39     helmet
+#    40     offhand
+# ================================================================
+
+kits:
+
+  sword:
+    display-name: "Sword"
+    permission: duels.kit.sword
+    aliases: []
+    icon:
+      type: DIAMOND_SWORD
+    slots:
+      0:
+        type: DIAMOND_SWORD
+        enchants:
+          unbreaking: 3
+      36:
+        type: DIAMOND_BOOTS
+        enchants:
+          protection: 3
+          unbreaking: 3
+      37:
+        type: DIAMOND_LEGGINGS
+        enchants:
+          protection: 3
+          unbreaking: 3
+      38:
+        type: DIAMOND_CHESTPLATE
+        enchants:
+          protection: 3
+          unbreaking: 3
+      39:
+        type: DIAMOND_HELMET
+        enchants:
+          protection: 4
+          unbreaking: 3
+
+  netheritepot:
+    display-name: "Netherite Pot"
+    permission: duels.kit.netheritepot
+    aliases: [npot]
+    icon:
+      type: NETHERITE_HELMET
+    slots:
+      0:
+        type: NETHERITE_SWORD
+        enchants:
+          sharpness: 5
+          sweeping_edge: 3
+          unbreaking: 3
+      1:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      2:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      3:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      4:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      5:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      6:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      7:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      8:
+        type: TOTEM_OF_UNDYING
+      9:
+        type: EXPERIENCE_BOTTLE
+        amount: 64
+      10:
+        type: EXPERIENCE_BOTTLE
+        amount: 64
+      11:
+        type: TOTEM_OF_UNDYING
+      12:
+        type: TOTEM_OF_UNDYING
+      13:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      14:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      15:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      16:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      17:
+        type: SPLASH_POTION
+        potion-type: strong_strength
+      18:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      19:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      20:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      21:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      22:
+        type: SPLASH_POTION
+        potion-type: strong_swiftness
+      23:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      24:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      25:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      26:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      27:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      28:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      29:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      30:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      31:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      32:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      33:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      34:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      35:
+        type: SPLASH_POTION
+        potion-type: strong_healing
+      36:
+        type: NETHERITE_BOOTS
+        enchants:
+          protection: 4
+          unbreaking: 3
+      37:
+        type: NETHERITE_LEGGINGS
+        enchants:
+          protection: 4
+          unbreaking: 3
+      38:
+        type: NETHERITE_CHESTPLATE
+        enchants:
+          protection: 4
+          unbreaking: 3
+      39:
+        type: NETHERITE_HELMET
+        enchants:
+          protection: 4
+          unbreaking: 3
+      40:
+        type: GOLDEN_APPLE
+        amount: 64

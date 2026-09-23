@@ -221,14 +221,18 @@ public class DuelManager {
      * request, the sender must not be on cooldown, and the duel world
      * must be available.</p>
      *
+     * <p>If a kit id is provided, it is resolved through the
+     * {@code KitManager} and validated against the sender's permissions.
+     * The canonical id is stored in the request, so later lookups do
+     * not need to resolve aliases again.</p>
+     *
      * <p>A {@link DuelRequestEvent} is fired before the request is
      * stored. If the event is cancelled by a listener, the request is
      * discarded and no cooldown is applied.</p>
      *
      * @param sender player sending the request
      * @param target player receiving the request
-     * @param kitId  optional kit identifier, or {@code null} to let the
-     *               duel run without a predefined kit
+     * @param kitId  optional kit identifier or alias, or {@code null}
      */
     public void sendRequest(Player sender, Player target, String kitId) {
         UUID su = sender.getUniqueId();
@@ -256,20 +260,49 @@ public class DuelManager {
             return;
         }
 
-        DuelRequestEvent event = new DuelRequestEvent(sender, target, kitId);
+        String resolvedKitId = kitId;
+        if (kitId != null) {
+            var kit = plugin.kits().resolve(kitId);
+            if (kit == null) {
+                plugin.messages().send(sender, "kit.not-found", Map.of("kit", kitId));
+                return;
+            }
+            if (!sender.hasPermission(kit.getPermission())) {
+                plugin.messages().send(sender, "kit.no-permission");
+                return;
+            }
+            resolvedKitId = kit.getId();
+        }
+
+        DuelRequestEvent event = new DuelRequestEvent(sender, target, resolvedKitId);
         Bukkit.getPluginManager().callEvent(event);
         if (event.isCancelled()) return;
 
         Duration timeout = Duration.ofSeconds(plugin.config().requestTimeoutSeconds());
-        DuelRequest request = new DuelRequest(su, tu, kitId, timeout);
+        DuelRequest request = new DuelRequest(su, tu, resolvedKitId, timeout);
         outgoing.put(su, request);
         incoming.put(tu, request);
         applyCooldown(su);
 
-        plugin.messages().send(sender, "duel.request-sent", Map.of("target", target.getName()));
-        plugin.messages().send(target, "duel.request-received", Map.of("sender", sender.getName()));
+        if (resolvedKitId != null) {
+            plugin.messages().send(sender, "duel.request-sent", Map.of(
+                    "target", target.getName(),
+                    "kit", resolvedKitId
+            ));
+            plugin.messages().send(target, "duel.request-received", Map.of(
+                    "sender", sender.getName(),
+                    "kit", resolvedKitId
+            ));
+        } else {
+            plugin.messages().send(sender, "duel.request-sent-no-kit", Map.of(
+                    "target", target.getName()
+            ));
+            plugin.messages().send(target, "duel.request-received-no-kit", Map.of(
+                    "sender", sender.getName()
+            ));
+        }
 
-        Log.debug("Duel request: %s -> %s (kit=%s)", sender.getName(), target.getName(), kitId);
+        Log.debug("Duel request: %s -> %s (kit=%s)", sender.getName(), target.getName(), resolvedKitId);
     }
 
     /**
@@ -317,6 +350,9 @@ public class DuelManager {
 
         clearRequest(request);
 
+        plugin.snapshots().capture(sender);
+        plugin.snapshots().capture(target);
+
         Location returnA = sender.getLocation().clone();
         Location returnB = target.getLocation().clone();
 
@@ -339,6 +375,16 @@ public class DuelManager {
 
         teleportSafe(sender, arena.getSpawn1());
         teleportSafe(target, arena.getSpawn2());
+
+        if (session.getKitId() != null) {
+            var kit = plugin.kits().get(session.getKitId());
+            if (kit != null) {
+                kit.apply(sender);
+                kit.apply(target);
+                Log.debug("Applied kit '%s' to %s and %s",
+                        kit.getId(), sender.getName(), target.getName());
+            }
+        }
 
         plugin.messages().send(sender, "duel.accepted-sender", Map.of("target", target.getName()));
         plugin.messages().send(target, "duel.accepted-target");
@@ -447,12 +493,12 @@ public class DuelManager {
 
         if (a != null) {
             a.showTitle(fight);
-            a.playSound(a.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+            a.playSound(a.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1f, 1f);
             plugin.messages().send(a, "duel.started");
         }
         if (b != null) {
             b.showTitle(fight);
-            b.playSound(b.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+            b.playSound(b.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1f, 1f);
             plugin.messages().send(b, "duel.started");
         }
 
@@ -540,7 +586,10 @@ public class DuelManager {
         Bukkit.getPluginManager().callEvent(new DuelEndEvent(session, winner, loser, reason));
 
         if (cleanup) {
-            if (winner != null) plugin.messages().send(winner, "duel.ended-win");
+            if (winner != null) {
+                plugin.messages().send(winner, "duel.ended-win");
+                winner.playSound(winner.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
+            }
             if (loser != null) plugin.messages().send(loser, "duel.ended-loss");
 
             if (winner == null && (reason == DuelEndReason.CANCELLED || reason == DuelEndReason.DRAW)) {
@@ -552,6 +601,14 @@ public class DuelManager {
 
             Player a = Bukkit.getPlayer(session.getPlayerA());
             Player b = Bukkit.getPlayer(session.getPlayerB());
+
+            if (a != null && plugin.snapshots().hasPending(a.getUniqueId())) {
+                plugin.snapshots().scheduleRestore(a, 4L);
+            }
+            if (b != null && plugin.snapshots().hasPending(b.getUniqueId())) {
+                plugin.snapshots().scheduleRestore(b, 4L);
+            }
+            
             if (a != null && session.getReturnA() != null) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> a.teleport(session.getReturnA()), 2L);
             }

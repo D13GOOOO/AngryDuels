@@ -7,8 +7,8 @@ general:
   reload-success: "<green>Configuration reloaded successfully."
   reload-failed: "<red>Reload failed. Check the console for details."
   help:
-    - "<gold><bold>RealisticDuels</bold></gold>"
-    - "<gray>/duel <player> <dark_gray>- <white>send a duel request"
+    - "<gold><bold>AngryDuels</bold></gold>"
+    - "<gray>/duel <player> [kit] <dark_gray>- <white>send a duel request, optionally with a kit"
     - "<gray>/duel accept <dark_gray>- <white>accept the pending request"
     - "<gray>/duel deny <dark_gray>- <white>deny the pending request"
     - "<gray>/duel forfeit <dark_gray>- <white>forfeit your active duel"
@@ -19,8 +19,10 @@ duel:
   sender-busy: "<red>You already have a pending request or an active duel."
   target-busy: "<red>That player is already busy with another duel or request."
   cooldown: "<red>Wait <white><seconds>s</white> before sending another request."
-  request-sent: "<green>Duel request sent to <white><target></white>."
-  request-received: "<yellow><sender></yellow> <gray>wants to duel you! <green><click:run_command:'/duel accept'>[ACCEPT]</click></green> <red><click:run_command:'/duel deny'>[DENY]</click></red>"
+  request-sent: "<green>Duel request sent to <white><target></white> <gray>with kit <white><kit></white></gray>."
+  request-sent-no-kit: "<green>Duel request sent to <white><target></white>."
+  request-received: "<yellow><sender></yellow> <gray>wants to duel you with kit <white><kit></white>! <green><click:run_command:'/duel accept'>[ACCEPT]</click></green> <red><click:run_command:'/duel deny'>[DENY]</click></red>"
+  request-received-no-kit: "<yellow><sender></yellow> <gray>wants to duel you! <green><click:run_command:'/duel accept'>[ACCEPT]</click></green> <red><click:run_command:'/duel deny'>[DENY]</click></red>"
   request-expired-sender: "<red>Your duel request to <white><target></white> expired."
   request-expired-target: "<gray>The duel request from <white><sender></white> expired."
   request-cancelled: "<yellow>The duel request was cancelled."
@@ -48,3 +50,7 @@ arena:
   list-header: "<gold>Arenas <gray>(<white><count></white>)"
   list-entry: "<gray>- <white><id></white> <dark_gray>|</dark_gray> <gray>world: <white><world></white> <dark_gray>|</dark_gray> <gray>state: <white><state></white>"
   no-arena-available: "<red>No free arena available. Try again later."
+
+kit:
+  not-found: "<red>Kit <white><kit></white> not found."
+  no-permission: "<red>You don't have permission to use this kit."

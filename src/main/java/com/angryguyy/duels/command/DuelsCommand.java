@@ -2,6 +2,9 @@ package com.angryguyy.duels.command;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.util.Log;
+import com.angryguyy.duels.arena.Arena;
+import com.angryguyy.duels.gui.KitSelectionGui;
+import java.util.stream.Stream;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -75,7 +78,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             case "deny" -> handleDeny(sender);
             case "forfeit" -> handleForfeit(sender);
             case "arena" -> handleArena(sender, args);
-            default -> handlePlayerTarget(sender, args[0]);
+            default -> handlePlayerTarget(sender, args);
         }
         return true;
     }
@@ -308,18 +311,34 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     /**
      * Sends a duel request from the sender to the named player.
      *
+     * <p>If a kit is provided as the second argument, the request is
+     * sent immediately with that kit. Otherwise, the kit selection GUI
+     * is opened so the sender can pick a kit visually. When the player
+     * clicks a kit, the request is sent by the GUI listener.</p>
+     *
      * @param sender source of the command; must be a player
-     * @param name   name of the target player
+     * @param args   full argument array
      */
-    private void handlePlayerTarget(CommandSender sender, String name) {
+    private void handlePlayerTarget(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
-        Player target = Bukkit.getPlayerExact(name);
+        Player target = Bukkit.getPlayerExact(args[0]);
         if (target == null) {
             plugin.messages().send(player, "duel.target-offline");
             return;
         }
-        plugin.duels().sendRequest(player, target, null);
+
+        if (args.length >= 2) {
+            plugin.duels().sendRequest(player, target, args[1]);
+            return;
+        }
+
+        if (player.getUniqueId().equals(target.getUniqueId())) {
+            plugin.messages().send(player, "duel.self");
+            return;
+        }
+
+        KitSelectionGui.open(plugin, player, target);
     }
 
     /**
@@ -374,7 +393,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 2 && args[0].equalsIgnoreCase("arena") && sender.hasPermission("duels.admin")) {
             String prefix = args[1].toLowerCase(Locale.ROOT);
-            return List.of("list", "create", "setspawn", "delete", "reload").stream()
+            return Stream.of("list", "create", "setspawn", "delete", "reload")
                     .filter(s -> s.startsWith(prefix))
                     .toList();
         }
@@ -384,7 +403,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             if (action.equals("setspawn") || action.equals("delete")) {
                 String prefix = args[2].toLowerCase(Locale.ROOT);
                 return plugin.arenas().all().stream()
-                        .map(a -> a.getId())
+                        .map(Arena::getId)
                         .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(prefix))
                         .toList();
             }
@@ -394,9 +413,32 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
                 && args[1].equalsIgnoreCase("setspawn")
                 && sender.hasPermission("duels.admin")) {
             String prefix = args[3].toLowerCase(Locale.ROOT);
-            return List.of("1", "2").stream().filter(s -> s.startsWith(prefix)).toList();
+            return Stream.of("1", "2")
+                    .filter(s -> s.startsWith(prefix))
+                    .toList();
+        }
+
+        if (args.length == 2 && !isSubcommand(args[0])) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            List<String> suggestions = new ArrayList<>();
+            for (var kit : plugin.kits().all()) {
+                suggestions.add(kit.getId());
+                suggestions.addAll(kit.getAliases());
+            }
+            return suggestions.stream()
+                    .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(prefix))
+                    .distinct()
+                    .toList();
         }
 
         return List.of();
     }
+
+    private boolean isSubcommand(String arg) {
+        return switch (arg.toLowerCase(Locale.ROOT)) {
+            case "help", "reload", "accept", "deny", "forfeit", "arena" -> true;
+            default -> false;
+        };
+    }
+
 }

@@ -1,5 +1,6 @@
 package com.angryguyy.duels.world;
 
+import java.io.File;
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.util.Log;
 import org.bukkit.Bukkit;
@@ -49,23 +50,37 @@ public class DuelWorldManager {
      * Initializes the duel world.
      *
      * <p>If a world with the configured name is already loaded, it is
-     * reused. Otherwise, if auto-creation is enabled, a new world is
-     * generated using the {@link VoidChunkGenerator}. In both cases
-     * the curated gamerules are applied afterwards. If the world
-     * cannot be found and auto-creation is disabled, the manager
-     * remains without a world and every dependent feature degrades
-     * gracefully.</p>
+     * reused. Otherwise the manager checks whether the world exists on
+     * disk and either loads it or creates a new one, depending on the
+     * auto-create flag. In every case the curated gamerules are applied
+     * afterwards.</p>
+     *
+     * <p>Bukkit does not automatically load worlds that are not declared
+     * in {@code bukkit.yml}, so a previously created duel world must be
+     * loaded explicitly here.</p>
      */
     public void init() {
         String name = plugin.config().worldName();
+        File worldFolder = new File(Bukkit.getWorldContainer(), name);
+        boolean existsOnDisk = worldFolder.exists()
+                && new File(worldFolder, "level.dat").exists();
+
         World existing = Bukkit.getWorld(name);
         if (existing != null) {
             this.duelWorld = existing;
-            Log.info("Found existing duel world: %s", name);
+            Log.info("Found loaded duel world: %s", name);
+        } else if (existsOnDisk) {
+            this.duelWorld = load(name);
+            if (duelWorld != null) {
+                Log.info("Loaded existing duel world from disk: %s", name);
+            } else {
+                Log.error("Failed to load duel world '%s'", name);
+                return;
+            }
         } else if (plugin.config().autoCreateWorld()) {
             this.duelWorld = create(name);
             if (duelWorld != null) {
-                Log.info("Created duel world: %s", name);
+                Log.info("Created new duel world: %s", name);
             } else {
                 Log.error("Failed to create duel world '%s'", name);
                 return;
@@ -79,12 +94,19 @@ public class DuelWorldManager {
     }
 
     /**
-     * Generates the duel world.
+     * Loads an existing duel world from disk.
      *
-     * <p>The world is created as a flat void environment with no
-     * structures. The spawn location is set to a safe point in the
-     * middle of the world at Y level 65, which is above the void floor
-     * used by arenas.</p>
+     * @param name name of the world to load
+     * @return the loaded world, or {@code null} if loading failed
+     */
+    private World load(String name) {
+        WorldCreator creator = new WorldCreator(name);
+        creator.generator(new VoidChunkGenerator());
+        return creator.createWorld();
+    }
+
+    /**
+     * Generates a brand new duel world.
      *
      * @param name name of the world to create
      * @return the created world, or {@code null} if generation failed

@@ -10,6 +10,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.Location;
+import org.bukkit.event.player.PlayerMoveEvent;
 
 /**
  * Applies the combat rules that protect duel integrity.
@@ -105,5 +107,36 @@ public class DuelProtectionListener implements Listener {
         if (entity instanceof Player p) return p;
         if (entity instanceof Projectile proj && proj.getShooter() instanceof Player p) return p;
         return null;
+    }
+
+    /**
+     * Freezes duelists in place during the countdown phase.
+     *
+     * <p>Any movement attempt is cancelled before the server applies it,
+     * so the player stays exactly on the spawn point assigned by the
+     * arena. Movement is released the instant the session switches to
+     * {@link DuelPhase#ACTIVE}.</p>
+     *
+     * <p>Only horizontal and vertical displacement is blocked; head
+     * rotation is left untouched so players can still look around while
+     * waiting for the fight to start.</p>
+     *
+     * @param event the move event
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onMove(PlayerMoveEvent event) {
+        DuelSession session = plugin.duels().getSession(event.getPlayer().getUniqueId());
+        if (session == null) return;
+        if (session.getPhase() != DuelPhase.COUNTDOWN) return;
+
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (to == null) return;
+
+        if (from.getX() != to.getX()
+                || from.getY() != to.getY()
+                || from.getZ() != to.getZ()) {
+            event.setTo(from);
+        }
     }
 }

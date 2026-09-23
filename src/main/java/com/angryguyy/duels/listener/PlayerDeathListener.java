@@ -14,12 +14,15 @@ import java.util.UUID;
 /**
  * Watches player deaths and concludes the corresponding duel.
  *
- * <p>When a player who is part of an active session dies, the opponent
- * is resolved as the winner and the session is ended with
- * {@link DuelEndReason#PLAYER_DIED}. The handler is intentionally
- * minimal: it does not touch drops, respawn logic, or inventory
- * restoration, which are handled elsewhere (or deferred to a later
- * phase of the plugin).</p>
+ * <p>When a duelist dies, the opponent is declared winner and the
+ * session ends with {@link DuelEndReason#PLAYER_DIED}. All dropped
+ * items and experience are cleared from the death event, because the
+ * duelist's original state is restored from a snapshot after the
+ * respawn; leaving drops in the world would duplicate items.</p>
+ *
+ * <p>Restoring the snapshot is delegated to
+ * {@link PlayerRespawnListener}, which waits for the respawn to
+ * complete before applying it.</p>
  */
 public class PlayerDeathListener implements Listener {
 
@@ -28,7 +31,7 @@ public class PlayerDeathListener implements Listener {
     /**
      * Creates a new death listener.
      *
-     * @param plugin owning plugin, used to look up sessions
+     * @param plugin owning plugin
      */
     public PlayerDeathListener(DuelsPlugin plugin) {
         this.plugin = plugin;
@@ -37,9 +40,8 @@ public class PlayerDeathListener implements Listener {
     /**
      * Handles a player death.
      *
-     * <p>If the deceased player is not part of a session, the handler
-     * returns without doing anything, leaving vanilla death behaviour
-     * untouched.</p>
+     * <p>If the deceased is not part of an active session, vanilla
+     * behaviour is left untouched.</p>
      *
      * @param event the death event
      */
@@ -48,6 +50,9 @@ public class PlayerDeathListener implements Listener {
         Player deceased = event.getEntity();
         DuelSession session = plugin.duels().getSession(deceased.getUniqueId());
         if (session == null) return;
+
+        event.getDrops().clear();
+        event.setDroppedExp(0);
 
         UUID opponentId = session.opponentOf(deceased.getUniqueId());
         Player winner = opponentId != null ? Bukkit.getPlayer(opponentId) : null;
