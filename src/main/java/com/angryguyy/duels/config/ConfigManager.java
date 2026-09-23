@@ -2,6 +2,9 @@ package com.angryguyy.duels.config;
 
 import com.angryguyy.duels.DuelsPlugin;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+
+import java.io.File;
 
 /**
  * Typed accessor for {@code config.yml}.
@@ -44,11 +47,23 @@ public class ConfigManager {
     /**
      * Reloads the configuration from disk.
      *
-     * <p>After this call, every getter reflects the values currently
-     * stored in the file. Callers are responsible for refreshing any
-     * component that cached a config value.</p>
+     * <p>Because Bukkit's {@code reloadConfig} swallows YAML syntax
+     * errors and only logs them, this method pre-validates the file so
+     * that a broken config is reported to the caller as an exception.
+     * If validation passes, the config is reloaded and all getters
+     * reflect the new values.</p>
+     *
+     * @throws RuntimeException if the config file contains invalid YAML
+     *                          or cannot be read
      */
     public void reload() {
+        File file = new File(plugin.getDataFolder(), "config.yml");
+        YamlConfiguration probe = new YamlConfiguration();
+        try {
+            probe.load(file);
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid config.yml: " + e.getMessage(), e);
+        }
         plugin.reloadConfig();
     }
 

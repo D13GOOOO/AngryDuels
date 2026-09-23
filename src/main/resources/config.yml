@@ -35,3 +35,50 @@ storage:
 #  Structure is filled automatically by the plugin.
 # ================================================================
 arenas: {}
+
+# ================================================================
+#  Rewards
+#
+#  Types:
+#    console   - dispatches a command as the console sender
+#                keys: command
+#    item      - gives an item; uses the same format as kits.yml
+#                keys: material, amount, enchants, name, unbreakable
+#    money     - deposits through Vault (requires Vault + economy)
+#                keys: amount
+#    xp        - gives experience points and/or levels
+#                keys: points, levels
+#    broadcast - sends a MiniMessage line to everyone
+#                keys: message
+#
+#  Placeholders:
+#    %winner%   %loser%   %arena%   %kit%   %reason%   %duration%
+#
+#  A kit-specific list under rewards.kits fully replaces the default
+#  list when a duel uses that kit.
+# ================================================================
+rewards:
+  enabled: true
+  grant-delay-ticks: 20
+  cooldown-seconds: 0
+
+  default:
+    - type: broadcast
+      message: "<gray>[<gold>Duels<gray>] <white>%winner%</white> defeated <white>%loser%</white> in <white>%arena%</white>!"
+    - type: xp
+      points: 30
+
+  kits:
+    sword:
+      - type: broadcast
+        message: "<gray>[<gold>Duels<gray>] <white>%winner%</white> won a <gold>Sword</gold> duel against <white>%loser%</white>!"
+      - type: xp
+        points: 50
+    netheritepot:
+      - type: broadcast
+        message: "<gray>[<gold>Duels<gray>] <white>%winner%</white> won a <gold>Netherite Pot</gold> duel against <white>%loser%</white>!"
+      - type: xp
+        points: 200
+      - type: item
+        material: DIAMOND
+        amount: 3

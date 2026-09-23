@@ -15,6 +15,8 @@ import com.angryguyy.duels.listener.KitGuiListener;
 import com.angryguyy.duels.snapshot.SnapshotManager;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.world.DuelWorldManager;
+import com.angryguyy.duels.listener.DuelRewardListener;
+import com.angryguyy.duels.reward.RewardManager;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -38,6 +40,7 @@ public final class DuelsPlugin extends JavaPlugin {
     private ArenaManager arenaManager;
     private SnapshotManager snapshotManager;
     private KitManager kitManager;
+    private RewardManager rewardManager;
 
     /**
      * Called by the server when the plugin is enabled.
@@ -58,6 +61,8 @@ public final class DuelsPlugin extends JavaPlugin {
         arenaManager.load();
         this.kitManager = new KitManager(this);
         kitManager.load();
+        this.rewardManager = new RewardManager(this);
+        rewardManager.load();
         this.snapshotManager = new SnapshotManager(this);
         snapshotManager.loadAll();
 
@@ -67,10 +72,10 @@ public final class DuelsPlugin extends JavaPlugin {
         registerCommands();
         registerListeners();
 
-        Log.info("Ready. Kits: %d, Arenas: %d, Pending snapshots: %d",
+        Log.info("Ready. Kits: %d, Arenas: %d, Vault: %s",
                 kitManager.all().size(),
                 arenaManager.all().size(),
-                snapshotManager.pendingCount());
+                rewardManager.getEconomy() != null ? "yes" : "no");
     }
 
     /**
@@ -106,6 +111,7 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new KitGuiListener(this), this);
+        getServer().getPluginManager().registerEvents(new DuelRewardListener(this), this);
     }
 
     public static DuelsPlugin getInstance() { return instance; }
@@ -116,4 +122,6 @@ public final class DuelsPlugin extends JavaPlugin {
     public ArenaManager arenas() { return arenaManager; }
     public SnapshotManager snapshots() { return snapshotManager; }
     public KitManager kits() { return kitManager; }
+    public RewardManager rewards() { return rewardManager;
+    }
 }

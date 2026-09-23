@@ -5,6 +5,7 @@ api-version: '1.21'
 authors: [ angryguyy ]
 description: Realistic duel system for Paper servers
 website: https://github.com/angryguyy/AngryDuels
+softdepend: [ Vault ]
 
 commands:
   duels:
