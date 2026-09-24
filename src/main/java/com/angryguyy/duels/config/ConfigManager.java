@@ -53,11 +53,18 @@ public class ConfigManager {
      * If validation passes, the config is reloaded and all getters
      * reflect the new values.</p>
      *
+     * <p>If the file has been deleted, the bundled default is written
+     * back to disk before validation, so a reload never leaves the
+     * plugin with an empty configuration.</p>
+     *
      * @throws RuntimeException if the config file contains invalid YAML
      *                          or cannot be read
      */
     public void reload() {
         File file = new File(plugin.getDataFolder(), "config.yml");
+        if (!file.exists()) {
+            plugin.saveDefaultConfig();
+        }
         YamlConfiguration probe = new YamlConfiguration();
         try {
             probe.load(file);
@@ -87,15 +94,6 @@ public class ConfigManager {
      */
     public boolean debug() {
         return raw().getBoolean("settings.debug", false);
-    }
-
-    /**
-     * Returns the configured language code.
-     *
-     * @return language identifier, defaulting to {@code en}
-     */
-    public String language() {
-        return raw().getString("settings.language", "en");
     }
 
     /**
@@ -152,16 +150,6 @@ public class ConfigManager {
      */
     public boolean autoCreateWorld() {
         return raw().getBoolean("world.auto-create", true);
-    }
-
-    /**
-     * Returns the configured world generator type.
-     *
-     * @return generator identifier, currently either {@code void} or
-     *         {@code normal}
-     */
-    public String worldGenerator() {
-        return raw().getString("world.generator", "void");
     }
 
     /**
@@ -236,14 +224,29 @@ public class ConfigManager {
         return raw().getBoolean("storage.mysql.use-ssl", false);
     }
 
+    /**
+     * Indicates whether MySQL statistics are enabled.
+     *
+     * @return {@code true} if the stats subsystem should be initialized
+     */
     public boolean statsEnabled() {
         return raw().getBoolean("stats.enabled", true);
     }
 
+    /**
+     * Returns the number of leaderboard entries shown per page.
+     *
+     * @return entries per page, positive
+     */
     public int leaderboardEntriesPerPage() {
         return raw().getInt("stats.leaderboard.entries-per-page", 10);
     }
 
+    /**
+     * Returns how often the leaderboard cache is refreshed.
+     *
+     * @return refresh interval in minutes, at least 1
+     */
     public int leaderboardRefreshMinutes() {
         return raw().getInt("stats.leaderboard.refresh-minutes", 2);
     }

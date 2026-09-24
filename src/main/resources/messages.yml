@@ -8,10 +8,12 @@ general:
   reload-failed: "<red>Reload failed. Check the console for details."
   help:
     - "<gold><bold>AngryDuels</bold></gold>"
-    - "<gray>/duel <player> [kit] <dark_gray>- <white>send a duel request, optionally with a kit"
+    - "<gray>/duel <player> [kit] <dark_gray>- <white>challenge a player. Without a kit, a selection GUI opens"
     - "<gray>/duel accept <dark_gray>- <white>accept the pending request"
     - "<gray>/duel deny <dark_gray>- <white>deny the pending request"
     - "<gray>/duel forfeit <dark_gray>- <white>forfeit your active duel"
+    - "<gray>/duel stats [player] <dark_gray>- <white>show duel statistics"
+    - "<gray>/duel top <category> [page|gui] <dark_gray>- <white>show the leaderboard"
 
 duel:
   self: "<red>You can't duel yourself."
@@ -36,6 +38,7 @@ duel:
   ended-loss: "<red>You lost the duel."
   ended-cancelled: "<yellow>The duel has been cancelled."
   not-in-duel: "<red>You're not in an active duel."
+  command-blocked: "<red>You can't use that command during a duel."
 
 arena:
   usage: "<gray>Usage: <white>/duel arena <list|create|setspawn|delete|reload>"
@@ -50,13 +53,17 @@ arena:
   list-header: "<gold>Arenas <gray>(<white><count></white>)"
   list-entry: "<gray>- <white><id></white> <dark_gray>|</dark_gray> <gray>world: <white><world></white> <dark_gray>|</dark_gray> <gray>state: <white><state></white>"
   no-arena-available: "<red>No free arena available. Try again later."
+  delete-occupied: "<red>Arena <white><id></white> is currently in use and cannot be deleted."
+  wrong-world: "<red>You must be inside the duel world to manage arenas."
 
 kit:
   not-found: "<red>Kit <white><kit></white> not found."
   no-permission: "<red>You don't have permission to use this kit."
+  no-kits-available: "<red>You don't have permission to use any kit."
 
 stats:
   not-found: "<red>No stats found for <white><player></white>."
+  disabled: "<red>Statistics are currently unavailable."
   header:
     - "<gold><bold>Stats of <white><player></white></bold></gold>"
   body:

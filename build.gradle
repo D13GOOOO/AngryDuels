@@ -18,16 +18,25 @@ repositories {
         url = 'https://jitpack.io'
     }
     maven {
+        name = 'helpch'
         url = 'https://repo.helpch.at/releases'
     }
 }
 
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT'
+
+    // Vault API is only needed for compilation; the server provides it
+    // at runtime through the Vault plugin. The transitive `bukkit`
+    // dependency is excluded because Paper already brings its own.
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
+
+    // Bundled and relocated inside the plugin jar.
     implementation 'com.zaxxer:HikariCP:5.1.0'
+
+    // PlaceholderAPI is optional; only the expansion class references it.
     compileOnly 'me.clip:placeholderapi:2.11.6'
 }
 
@@ -38,7 +47,7 @@ java {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 21
-    options.compilerArgs += ['-Xlint:deprecation']
+    options.compilerArgs += ['-Xlint:deprecation', '-Xlint:unchecked']
 }
 
 tasks.named('processResources') {

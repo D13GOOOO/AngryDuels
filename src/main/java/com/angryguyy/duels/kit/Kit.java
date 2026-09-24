@@ -1,16 +1,15 @@
 package com.angryguyy.duels.kit;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.ItemFlag;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,19 +29,19 @@ import java.util.Map;
  * <p>Preserving the slot of every item is a core design requirement:
  * the future in-game kit editor will let players move items between
  * slots, and the order in which items are shown and applied must match
- * the order stored in the config file exactly. For this reason the
- * backing map is a {@link java.util.TreeMap} so iteration is always
- * ordered by ascending slot index.</p>
+ * the order stored in the config file exactly. The backing map is a
+ * {@link java.util.TreeMap} so iteration is always ordered by ascending
+ * slot index.</p>
  *
  * <p>Each kit also carries a display icon used by the selection GUI.
  * The icon is a standalone {@link ItemStack} built from the
  * {@code icon} block in {@code kits.yml} and is unrelated to the actual
  * kit contents; it is only used for visual representation.</p>
  *
- * <p>Instances are effectively immutable after construction; the
- * underlying item stacks are cloned on both retrieval and application
- * so that a kit can be applied to any number of players without
- * sharing mutable state.</p>
+ * <p>Instances are effectively immutable after construction. Every
+ * getter that exposes an item stack or the item map returns a defensive
+ * copy, so a caller cannot corrupt the kit by mutating the returned
+ * objects.</p>
  */
 public class Kit {
 
@@ -110,12 +109,18 @@ public class Kit {
     }
 
     /**
-     * Returns the item map, keyed by exact inventory slot.
+     * Returns a defensive copy of the item map, keyed by exact
+     * inventory slot.
      *
-     * @return an unmodifiable, slot-ordered map
+     * <p>Both the map and the individual item stacks are copied, so
+     * mutating the returned objects does not affect the kit.</p>
+     *
+     * @return a slot-ordered, unmodifiable copy of the item map
      */
     public Map<Integer, ItemStack> getItems() {
-        return items;
+        Map<Integer, ItemStack> copy = new LinkedHashMap<>();
+        items.forEach((slot, item) -> copy.put(slot, item == null ? null : item.clone()));
+        return Collections.unmodifiableMap(copy);
     }
 
     /**
@@ -143,8 +148,9 @@ public class Kit {
      * as title and a short action hint in the lore.
      *
      * <p>Item attribute tooltips (armor, attack damage, and similar
-     * statistics added automatically by the client) are hidden so that
-     * the icon only shows the kit name and the hint.</p>
+     * statistics added automatically by the client) and enchantment
+     * glint are hidden so that the icon only shows the kit name and the
+     * hint.</p>
      *
      * @param permitted whether the viewer has permission to use the kit
      * @return the decorated icon

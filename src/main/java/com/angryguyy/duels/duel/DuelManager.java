@@ -10,6 +10,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
@@ -316,13 +317,17 @@ public class DuelManager {
      *     <li>An arena is assigned through the {@code ArenaManager}.
      *     If no arena is free, both players are notified and nothing
      *     else happens.</li>
-     *     <li>The current locations of both players are captured so
-     *     they can be restored when the duel ends.</li>
+     *     <li>Both players are snapshotted and their current locations
+     *     are captured so they can be restored when the duel ends.</li>
      *     <li>A {@link DuelSession} is created and a
      *     {@link DuelStartEvent} is fired. If the event is cancelled,
-     *     the arena is released and the duel is aborted.</li>
-     *     <li>Both players are teleported to the assigned spawns and a
-     *     countdown is started.</li>
+     *     the arena is released, the snapshots are discarded, and the
+     *     duel is aborted.</li>
+     *     <li>Both players are teleported to the assigned spawns and
+     *     switched to survival. The session is registered only after
+     *     the teleport, so that the isolation listener does not block
+     *     the initial move to the arena.</li>
+     *     <li>The kit is applied and the countdown is started.</li>
      * </ol>
      *
      * @param target player accepting the incoming request
@@ -365,16 +370,23 @@ public class DuelManager {
         Bukkit.getPluginManager().callEvent(event);
         if (event.isCancelled()) {
             plugin.arenas().release(arena);
+            plugin.snapshots().restore(sender);
+            plugin.snapshots().restore(target);
             plugin.messages().send(sender, "duel.ended-cancelled");
             plugin.messages().send(target, "duel.ended-cancelled");
             return;
         }
 
-        sessions.put(sender.getUniqueId(), session);
-        sessions.put(target.getUniqueId(), session);
-
         teleportSafe(sender, arena.getSpawn1());
         teleportSafe(target, arena.getSpawn2());
+
+        sender.setGameMode(GameMode.SURVIVAL);
+        target.setGameMode(GameMode.SURVIVAL);
+        sender.setFireTicks(0);
+        target.setFireTicks(0);
+
+        sessions.put(sender.getUniqueId(), session);
+        sessions.put(target.getUniqueId(), session);
 
         if (session.getKitId() != null) {
             var kit = plugin.kits().get(session.getKitId());
@@ -476,8 +488,8 @@ public class DuelManager {
      *
      * <p>If the session is no longer the active one registered in the
      * manager, the method returns silently. Otherwise it updates the
-     * phase, shows the {@code FIGHT!} title and plays a level-up sound
-     * to both duelists.</p>
+     * phase, shows the {@code FIGHT!} title and plays a Wither spawn
+     * sound to both duelists.</p>
      *
      * @param session session to activate
      * @param a       first duelist, possibly {@code null}
@@ -553,8 +565,13 @@ public class DuelManager {
      * Otherwise it removes both players from the sessions map, releases
      * the arena, resolves the loser from the winner, fires a
      * {@link DuelEndEvent}, and — if {@code cleanup} is {@code true} —
-     * sends the outcome messages and schedules a delayed teleport of
-     * both players back to their captured return locations.</p>
+     * sends the outcome messages and restores the players.</p>
+     *
+     * <p>When the end reason is {@link DuelEndReason#PLAYER_DIED},
+     * snapshot restoration is delegated to the respawn listener, because
+     * applying the snapshot before the vanilla respawn would be
+     * overwritten by the server. For every other reason, restoration is
+     * scheduled directly from this method.</p>
      *
      * <p>The {@code cleanup} flag exists so that shutdown can fire the
      * end event for external modules without performing player-facing
@@ -565,7 +582,7 @@ public class DuelManager {
      * @param winner  the winning player, or {@code null} if there is no
      *                winner (cancelled or drawn duel)
      * @param reason  reason the duel is ending
-     * @param cleanup whether to send messages and teleport players back
+     * @param cleanup whether to send messages and restore players
      */
     public void endSession(DuelSession session, Player winner, DuelEndReason reason, boolean cleanup) {
         if (sessions.get(session.getPlayerA()) != session) return;
@@ -602,17 +619,21 @@ public class DuelManager {
             Player a = Bukkit.getPlayer(session.getPlayerA());
             Player b = Bukkit.getPlayer(session.getPlayerB());
 
-            if (a != null && plugin.snapshots().hasPending(a.getUniqueId())) {
-                plugin.snapshots().scheduleRestore(a, 4L);
+            if (reason != DuelEndReason.PLAYER_DIED) {
+                if (a != null && plugin.snapshots().hasPending(a.getUniqueId())) {
+                    plugin.snapshots().scheduleRestore(a, 4L);
+                }
+                if (b != null && plugin.snapshots().hasPending(b.getUniqueId())) {
+                    plugin.snapshots().scheduleRestore(b, 4L);
+                }
             }
-            if (b != null && plugin.snapshots().hasPending(b.getUniqueId())) {
-                plugin.snapshots().scheduleRestore(b, 4L);
-            }
-            
-            if (a != null && session.getReturnA() != null) {
+
+            if (a != null && session.getReturnA() != null
+                    && !plugin.snapshots().hasPending(a.getUniqueId())) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> a.teleport(session.getReturnA()), 2L);
             }
-            if (b != null && session.getReturnB() != null) {
+            if (b != null && session.getReturnB() != null
+                    && !plugin.snapshots().hasPending(b.getUniqueId())) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> b.teleport(session.getReturnB()), 2L);
             }
         }

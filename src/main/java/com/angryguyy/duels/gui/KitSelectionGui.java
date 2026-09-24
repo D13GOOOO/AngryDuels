@@ -2,6 +2,7 @@ package com.angryguyy.duels.gui;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.kit.Kit;
+import com.angryguyy.duels.util.Log;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -25,7 +26,12 @@ import java.util.Map;
  * <p>Each kit is rendered using its {@code icon} block from
  * {@code kits.yml}, decorated with the kit display name and a short
  * action hint. Kits the viewer cannot use are still shown but cannot
- * be clicked.</p>
+ * be clicked, so the viewer sees the full catalogue.</p>
+ *
+ * <p>If the server defines more kits than there are available slots,
+ * the excess ones are skipped and a warning is logged. If the viewer
+ * has permission for no kit at all, the GUI is not opened and an
+ * informational message is sent instead.</p>
  */
 public final class KitSelectionGui {
 
@@ -44,7 +50,29 @@ public final class KitSelectionGui {
      */
     public static void open(DuelsPlugin plugin, Player viewer, Player target) {
         List<Kit> kits = List.copyOf(plugin.kits().all());
+
+        if (kits.size() > KIT_SLOTS.length) {
+            Log.warn("Kit selection GUI has only %d slots, but %d kits are loaded. Extra kits are hidden.",
+                    KIT_SLOTS.length, kits.size());
+        }
+
         Map<Integer, Kit> slotToKit = new HashMap<>();
+        int index = 0;
+        boolean anyPermitted = false;
+        for (Kit kit : kits) {
+            if (index >= KIT_SLOTS.length) break;
+            int slot = KIT_SLOTS[index++];
+            boolean permitted = viewer.hasPermission(kit.getPermission());
+            if (permitted) {
+                slotToKit.put(slot, kit);
+                anyPermitted = true;
+            }
+        }
+
+        if (!anyPermitted) {
+            plugin.messages().send(viewer, "kit.no-kits-available");
+            return;
+        }
 
         KitGuiHolder holder = new KitGuiHolder(
                 viewer.getUniqueId(),
@@ -60,18 +88,37 @@ public final class KitSelectionGui {
 
         fillBorder(inv);
 
-        int index = 0;
+        for (Map.Entry<Integer, Kit> entry : slotToKit.entrySet()) {
+            int slot = entry.getKey();
+            Kit kit = entry.getValue();
+            inv.setItem(slot, kit.buildGuiIcon(true));
+        }
+
         for (Kit kit : kits) {
-            if (index >= KIT_SLOTS.length) break;
-            int slot = KIT_SLOTS[index++];
-            boolean permitted = viewer.hasPermission(kit.getPermission());
-            inv.setItem(slot, kit.buildGuiIcon(permitted));
-            if (permitted) {
-                slotToKit.put(slot, kit);
-            }
+            if (slotToKit.containsValue(kit)) continue;
+            int remainingSlot = nextFreeSlot(inv);
+            if (remainingSlot == -1) break;
+            inv.setItem(remainingSlot, kit.buildGuiIcon(false));
         }
 
         viewer.openInventory(inv);
+    }
+
+    /**
+     * Returns the next unused kit slot, or {@code -1} if every slot is
+     * already taken.
+     *
+     * @param inv inventory to inspect
+     * @return next free kit slot, or {@code -1}
+     */
+    private static int nextFreeSlot(Inventory inv) {
+        for (int slot : KIT_SLOTS) {
+            ItemStack current = inv.getItem(slot);
+            if (current == null || current.getType() == Material.AIR) {
+                return slot;
+            }
+        }
+        return -1;
     }
 
     /**

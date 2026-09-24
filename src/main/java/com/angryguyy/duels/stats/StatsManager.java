@@ -90,6 +90,10 @@ public class StatsManager {
      * end; if any statement throws, the connection is closed without a
      * commit, effectively rolling back all changes.</p>
      *
+     * <p>{@code autocommit} is always restored to {@code true} before the
+     * connection returns to the pool, so no residual transaction state
+     * leaks into the next borrower of the same connection.</p>
+     *
      * @param conn       active connection
      * @param winnerUuid winner uuid
      * @param winnerName winner username
@@ -106,16 +110,29 @@ public class StatsManager {
                           String kitId, String arenaId,
                           long duration, String reason) throws SQLException {
         conn.setAutoCommit(false);
-        upsertPlayer(conn, winnerUuid, winnerName);
-        if (loserUuid != null) upsertPlayer(conn, loserUuid, loserName);
-        updateWinnerStats(conn, winnerUuid, reason);
-        if (loserUuid != null) updateLoserStats(conn, loserUuid, reason);
-        if (kitId != null) {
-            updateKitStats(conn, winnerUuid, kitId, true);
-            if (loserUuid != null) updateKitStats(conn, loserUuid, kitId, false);
+        try {
+            upsertPlayer(conn, winnerUuid, winnerName);
+            if (loserUuid != null) upsertPlayer(conn, loserUuid, loserName);
+            updateWinnerStats(conn, winnerUuid, reason);
+            if (loserUuid != null) updateLoserStats(conn, loserUuid, reason);
+            if (kitId != null) {
+                updateKitStats(conn, winnerUuid, kitId, true);
+                if (loserUuid != null) updateKitStats(conn, loserUuid, kitId, false);
+            }
+            insertHistory(conn, winnerUuid, loserUuid, kitId, arenaId, duration, reason);
+            conn.commit();
+        } catch (SQLException e) {
+            try {
+                conn.rollback();
+            } catch (SQLException ignored) {
+            }
+            throw e;
+        } finally {
+            try {
+                conn.setAutoCommit(true);
+            } catch (SQLException ignored) {
+            }
         }
-        insertHistory(conn, winnerUuid, loserUuid, kitId, arenaId, duration, reason);
-        conn.commit();
     }
 
     /**

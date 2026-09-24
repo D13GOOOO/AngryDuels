@@ -25,10 +25,14 @@ import java.util.UUID;
  * Readers access the cached list synchronously and never block the main
  * thread on a database query.</p>
  *
- * <p>Each list holds up to 10 pages worth of entries, so players can
- * browse through pages without triggering a database round trip. The
- * size of the cache is derived from the configured entries per page
- * multiplied by the page cap.</p>
+ * <p>Each list holds up to {@link #PAGE_CAP} pages worth of entries, so
+ * players can browse through pages without triggering a database round
+ * trip. The size of the cache is derived from the configured entries
+ * per page multiplied by the page cap.</p>
+ *
+ * <p>All reads of the cache return a defensive copy. This makes the
+ * cache safe to iterate from the main thread while the async refresh
+ * task is replacing its contents.</p>
  */
 public class LeaderboardManager {
 
@@ -161,15 +165,16 @@ public class LeaderboardManager {
     /**
      * Returns a page from the cached leaderboard.
      *
+     * <p>The cached list is copied under lock before being sliced, so
+     * the returned sub-list is safe to use even if the async refresh
+     * task replaces the cache in the meantime.</p>
+     *
      * @param category category to read
      * @param page     one-based page number
      * @return list of entries for the requested page, possibly empty
      */
     public List<LeaderboardEntry> getPage(LeaderboardCategory category, int page) {
-        List<LeaderboardEntry> all;
-        synchronized (cache) {
-            all = cache.getOrDefault(category, List.of());
-        }
+        List<LeaderboardEntry> all = getCached(category);
         int perPage = plugin.config().leaderboardEntriesPerPage();
         int from = Math.max(0, (page - 1) * perPage);
         int to = Math.min(all.size(), from + perPage);
@@ -184,16 +189,13 @@ public class LeaderboardManager {
      * @return number of pages, at least 1
      */
     public int totalPages(LeaderboardCategory category) {
-        List<LeaderboardEntry> all;
-        synchronized (cache) {
-            all = cache.getOrDefault(category, List.of());
-        }
+        List<LeaderboardEntry> all = getCached(category);
         int perPage = plugin.config().leaderboardEntriesPerPage();
         return Math.max(1, (int) Math.ceil((double) all.size() / perPage));
     }
 
     /**
-     * Returns the cached entries of a category, for GUI usage.
+     * Returns a defensive copy of the cached entries of a category.
      *
      * @param category category to read
      * @return immutable copy of the cached list

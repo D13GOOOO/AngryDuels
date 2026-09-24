@@ -49,6 +49,7 @@ public class KitGuiListener implements Listener {
         event.setCancelled(true);
 
         if (!(event.getWhoClicked() instanceof Player viewer)) return;
+        if (!viewer.isOnline()) return;
         if (!viewer.getUniqueId().equals(gui.getViewer())) return;
 
         Kit kit = gui.getSlotToKit().get(event.getRawSlot());

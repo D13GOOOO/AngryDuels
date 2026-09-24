@@ -2,6 +2,7 @@ package com.angryguyy.duels.kit;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.util.Log;
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
@@ -21,8 +22,7 @@ import java.util.TreeMap;
  * <p>Kits are stored both by their primary id and, for lookup, through
  * a secondary alias index. The manager is the single access point for
  * resolving a kit by id or alias, and it owns the mapping between the
- * YAML structure and the immutable {@link Kit} instances used at
- * runtime.</p>
+ * YAML structure and the {@link Kit} instances used at runtime.</p>
  *
  * <p>The manager never mutates kits after loading. A reload is
  * performed by calling {@link #load()} again, which discards any
@@ -57,6 +57,10 @@ public class KitManager {
      * written to the plugin data folder first. Malformed kits are
      * logged and skipped individually, so that one invalid entry does
      * not prevent the rest of the file from loading.</p>
+     *
+     * <p>If two kits declare the same alias, the second declaration
+     * wins and a warning is logged. Ids are unique by construction
+     * because they are the keys of the top-level section.</p>
      */
     public void load() {
         kits.clear();
@@ -81,7 +85,12 @@ public class KitManager {
                 if (kit != null) {
                     kits.put(kit.getId(), kit);
                     for (String alias : kit.getAliases()) {
-                        aliasIndex.put(alias.toLowerCase(Locale.ROOT), kit.getId());
+                        String lower = alias.toLowerCase(Locale.ROOT);
+                        String previous = aliasIndex.put(lower, kit.getId());
+                        if (previous != null && !previous.equals(kit.getId())) {
+                            Log.warn("Alias '%s' of kit '%s' overrides the same alias on kit '%s'.",
+                                    alias, kit.getId(), previous);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -157,7 +166,7 @@ public class KitManager {
         }
         ItemStack fallback = items.get(0);
         if (fallback != null) return fallback.clone();
-        return new ItemStack(org.bukkit.Material.BARRIER);
+        return new ItemStack(Material.BARRIER);
     }
 
     /**
@@ -173,9 +182,10 @@ public class KitManager {
     /**
      * Resolves a kit by id or alias.
      *
-     * <p>The lookup is case-insensitive on aliases but exact on ids to
-     * avoid surprising collisions. Returns {@code null} if the name
-     * matches no kit.</p>
+     * <p>The lookup is exact on ids and case-insensitive on aliases,
+     * to avoid surprising collisions on the primary identifier. If the
+     * name matches nothing, {@code null} is returned; callers are
+     * expected to translate that into a user-facing error.</p>
      *
      * @param name id or alias
      * @return the matching kit, or {@code null}
@@ -190,6 +200,10 @@ public class KitManager {
 
     /**
      * Returns all loaded kits.
+     *
+     * <p>The returned collection is a live view of the internal map
+     * and preserves declaration order. It should only be iterated, not
+     * mutated.</p>
      *
      * @return collection of kits in declaration order
      */

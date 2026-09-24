@@ -14,7 +14,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
 import java.time.Duration;
@@ -26,7 +25,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.LinkedHashMap;
 
 /**
  * Loads reward definitions from {@code config.yml} and grants them to
@@ -47,7 +45,9 @@ import java.util.LinkedHashMap;
  * <p>Rewards are scheduled after a configurable delay so that the
  * winner's inventory is applied after the duel return teleport. An
  * optional cooldown prevents farming by limiting how often the same
- * player can receive rewards.</p>
+ * player can receive rewards. The cooldown is applied at the moment
+ * the duel ends, not when the delayed grant runs, so a winner who
+ * disconnects within the delay window still receives the cooldown.</p>
  */
 public class RewardManager {
 
@@ -76,11 +76,12 @@ public class RewardManager {
      * <p>Any previously loaded reward is discarded. Malformed entries
      * are logged and skipped individually so that the rest of the
      * configuration still loads.</p>
+     *
+     * <p>A delayed task is scheduled to resolve the Vault economy
+     * provider a couple of seconds after startup, giving third-party
+     * plugins the time to register their economy service.</p>
      */
     public void load() {
-        defaultRewards = List.of();
-        kitRewards = new HashMap<>();
-
         FileConfiguration cfg = plugin.config().raw();
         enabled = cfg.getBoolean("rewards.enabled", true);
         grantDelayTicks = cfg.getInt("rewards.grant-delay-ticks", 20);
@@ -88,15 +89,17 @@ public class RewardManager {
 
         defaultRewards = parseList(cfg.getMapList("rewards.default"));
 
+        Map<String, List<Reward>> newKitRewards = new HashMap<>();
         ConfigurationSection kitsSec = cfg.getConfigurationSection("rewards.kits");
         if (kitsSec != null) {
             for (String kitId : kitsSec.getKeys(false)) {
                 List<Reward> parsed = parseList(kitsSec.getMapList(kitId));
                 if (!parsed.isEmpty()) {
-                    kitRewards.put(kitId, parsed);
+                    newKitRewards.put(kitId, parsed);
                 }
             }
         }
+        kitRewards = newKitRewards;
 
         Log.info("Loaded rewards: %d default, %d kit override(s).",
                 defaultRewards.size(), kitRewards.size());
@@ -150,7 +153,11 @@ public class RewardManager {
         return switch (type.toLowerCase(Locale.ROOT)) {
             case "console" -> {
                 String cmd = (String) map.get("command");
-                yield cmd != null ? new ConsoleCommandReward(cmd) : null;
+                if (cmd == null) {
+                    Log.warn("Console reward missing 'command', skipping.");
+                    yield null;
+                }
+                yield new ConsoleCommandReward(cmd);
             }
             case "item" -> {
                 Object material = map.get("material");
@@ -174,7 +181,11 @@ public class RewardManager {
             }
             case "broadcast" -> {
                 String msg = (String) map.get("message");
-                yield msg != null ? new BroadcastReward(msg) : null;
+                if (msg == null) {
+                    Log.warn("Broadcast reward missing 'message', skipping.");
+                    yield null;
+                }
+                yield new BroadcastReward(msg);
             }
             default -> {
                 Log.warn("Unknown reward type '%s'", type);
@@ -189,9 +200,16 @@ public class RewardManager {
      * <p>If rewards are disabled, if there is no winner, or if the
      * winner is on cooldown, the method returns without scheduling
      * anything. Otherwise it captures a {@link RewardContext} at the
-     * time the duel ends and schedules the actual granting after the
-     * configured delay, so the winner has already been teleported back
-     * to their pre-duel location.</p>
+     * time the duel ends, applies the cooldown immediately, and
+     * schedules the actual granting after the configured delay, so the
+     * winner has already been teleported back to their pre-duel
+     * location.</p>
+     *
+     * <p>The winner is re-fetched by uuid inside the delayed task, so a
+     * disconnect-and-reconnect cycle within the delay window is handled
+     * correctly and the rewards are applied to the new player instance.
+     * If the winner is offline when the task runs, the rewards are
+     * silently skipped and the cooldown remains in place.</p>
      *
      * @param event the duel end event
      */
@@ -208,12 +226,16 @@ public class RewardManager {
         List<Reward> rewards = resolveRewards(event.getSession().getKitId());
         if (rewards.isEmpty()) return;
 
+        if (cooldownSeconds > 0) {
+            cooldowns.put(winner.getUniqueId(), Instant.now().plusSeconds(cooldownSeconds));
+        }
+
         String arenaId = event.getSession().getArena() != null
                 ? event.getSession().getArena().getId() : null;
         long durationSeconds = Duration.between(
                 event.getSession().getStartedAt(), Instant.now()).getSeconds();
 
-        RewardContext ctx = new RewardContext(
+        RewardContext baseCtx = new RewardContext(
                 winner,
                 event.getLoser(),
                 arenaId,
@@ -222,17 +244,30 @@ public class RewardManager {
                 durationSeconds
         );
 
+        UUID winnerId = winner.getUniqueId();
+
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!winner.isOnline()) return;
+            Player current = Bukkit.getPlayer(winnerId);
+            if (current == null || !current.isOnline()) {
+                Log.debug("Reward grant skipped: winner %s is offline.", winnerId);
+                return;
+            }
+
+            RewardContext ctx = new RewardContext(
+                    current,
+                    baseCtx.getLoser(),
+                    baseCtx.getArenaId(),
+                    baseCtx.getKitId(),
+                    baseCtx.getReason(),
+                    baseCtx.getDurationSeconds()
+            );
+
             for (Reward r : rewards) {
                 try {
                     r.grant(ctx);
                 } catch (Exception e) {
-                    Log.error(e, "Failed to grant reward to %s", winner.getName());
+                    Log.error(e, "Failed to grant reward to %s", current.getName());
                 }
-            }
-            if (cooldownSeconds > 0) {
-                cooldowns.put(winner.getUniqueId(), Instant.now().plusSeconds(cooldownSeconds));
             }
         }, grantDelayTicks);
     }
@@ -255,6 +290,8 @@ public class RewardManager {
 
     /**
      * Checks whether a player is currently on reward cooldown.
+     *
+     * <p>Expired entries are removed lazily on access.</p>
      *
      * @param uuid player uuid
      * @return {@code true} if the player cannot receive rewards yet

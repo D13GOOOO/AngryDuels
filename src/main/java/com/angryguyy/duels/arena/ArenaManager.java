@@ -231,13 +231,21 @@ public class ArenaManager {
     /**
      * Removes an arena and persists the change to disk.
      *
+     * <p>An arena that is currently occupied by an active duel cannot be
+     * deleted, since the session holds a reference to it and releasing
+     * it later would silently succeed on a detached object. The caller
+     * is expected to inform the administrator when the deletion is
+     * refused.</p>
+     *
      * @param id id of the arena to delete
-     * @return {@code true} if an arena with the given id existed and
-     *         was removed, {@code false} otherwise
+     * @return {@code true} if the arena was removed, {@code false} if it
+     *         does not exist or is currently in use
      */
     public boolean delete(String id) {
-        Arena removed = arenas.remove(id);
-        if (removed == null) return false;
+        Arena arena = arenas.get(id);
+        if (arena == null) return false;
+        if (arena.isOccupied()) return false;
+        arenas.remove(id);
         save();
         return true;
     }

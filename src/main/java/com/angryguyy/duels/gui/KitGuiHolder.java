@@ -5,6 +5,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
 
@@ -19,6 +20,10 @@ import java.util.UUID;
  * <p>Using a dedicated holder is the recommended way to distinguish
  * plugin GUIs from third-party inventories, since titles can be edited
  * by players and item names are not guaranteed to be unique.</p>
+ *
+ * <p>The mapping returned by {@link #getSlotToKit()} is an unmodifiable
+ * view, so the click listener cannot accidentally corrupt the holder
+ * by mutating the returned map.</p>
  */
 public class KitGuiHolder implements InventoryHolder {
 
@@ -60,12 +65,12 @@ public class KitGuiHolder implements InventoryHolder {
     }
 
     /**
-     * Returns the slot-to-kit mapping.
+     * Returns an unmodifiable view of the slot-to-kit mapping.
      *
      * @return mapping used by the click listener
      */
     public Map<Integer, Kit> getSlotToKit() {
-        return slotToKit;
+        return Collections.unmodifiableMap(slotToKit);
     }
 
     /**

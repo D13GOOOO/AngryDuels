@@ -9,6 +9,18 @@
 #    38     chestplate
 #    39     helmet
 #    40     offhand
+#
+#  Item format:
+#    type:          Material name (required)
+#    amount:        stack size (default 1)
+#    enchants:      map of enchantment key -> level
+#    potion-type:   PotionType key, only for potion-like materials
+#    name:          MiniMessage display name
+#    unbreakable:   boolean
+#
+#  The optional `icon` block, parsed with the same format as regular
+#  items, defines what the kit selector GUI shows. If missing, the item
+#  in slot 0 is used as a fallback.
 # ================================================================
 
 kits:

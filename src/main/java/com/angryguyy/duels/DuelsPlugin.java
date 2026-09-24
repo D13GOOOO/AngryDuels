@@ -6,22 +6,23 @@ import com.angryguyy.duels.config.ConfigManager;
 import com.angryguyy.duels.config.MessagesManager;
 import com.angryguyy.duels.duel.DuelManager;
 import com.angryguyy.duels.kit.KitManager;
+import com.angryguyy.duels.listener.DuelIsolationListener;
 import com.angryguyy.duels.listener.DuelProtectionListener;
+import com.angryguyy.duels.listener.DuelRewardListener;
+import com.angryguyy.duels.listener.DuelStatsListener;
+import com.angryguyy.duels.listener.KitGuiListener;
+import com.angryguyy.duels.listener.LeaderboardGuiListener;
 import com.angryguyy.duels.listener.PlayerDeathListener;
 import com.angryguyy.duels.listener.PlayerJoinListener;
 import com.angryguyy.duels.listener.PlayerQuitListener;
 import com.angryguyy.duels.listener.PlayerRespawnListener;
-import com.angryguyy.duels.listener.KitGuiListener;
-import com.angryguyy.duels.listener.LeaderboardGuiListener;
+import com.angryguyy.duels.reward.RewardManager;
 import com.angryguyy.duels.snapshot.SnapshotManager;
+import com.angryguyy.duels.stats.DatabaseManager;
+import com.angryguyy.duels.stats.LeaderboardManager;
+import com.angryguyy.duels.stats.StatsManager;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.world.DuelWorldManager;
-import com.angryguyy.duels.listener.DuelRewardListener;
-import com.angryguyy.duels.reward.RewardManager;
-import com.angryguyy.duels.stats.DatabaseManager;
-import com.angryguyy.duels.stats.StatsManager;
-import com.angryguyy.duels.stats.LeaderboardManager;
-import com.angryguyy.duels.listener.DuelStatsListener;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -60,6 +61,7 @@ public final class DuelsPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         instance = this;
+        Log.info("AngryDuels v%s loading subsystems...", getPluginMeta().getVersion());
 
         this.configManager = new ConfigManager(this);
         this.messagesManager = new MessagesManager(this);
@@ -90,10 +92,11 @@ public final class DuelsPlugin extends JavaPlugin {
         registerCommands();
         registerListeners();
 
-        Log.info("Ready. Kits: %d, Arenas: %d, Vault: %s",
+        Log.info("Ready. Kits: %d, Arenas: %d, Vault: %s, MySQL: %s",
                 kitManager.all().size(),
                 arenaManager.all().size(),
-                rewardManager.getEconomy() != null ? "yes" : "no");
+                rewardManager.getEconomy() != null ? "yes" : "no",
+                databaseManager.isReady() ? "yes" : "no");
     }
 
     /**
@@ -130,10 +133,11 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new PlayerRespawnListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelProtectionListener(this), this);
+        getServer().getPluginManager().registerEvents(new DuelIsolationListener(this), this);
         getServer().getPluginManager().registerEvents(new KitGuiListener(this), this);
+        getServer().getPluginManager().registerEvents(new LeaderboardGuiListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelRewardListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelStatsListener(this), this);
-        getServer().getPluginManager().registerEvents(new LeaderboardGuiListener(this), this);
     }
 
     public static DuelsPlugin getInstance() { return instance; }

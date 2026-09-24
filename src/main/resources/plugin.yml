@@ -6,6 +6,7 @@ authors: [ angryguyy ]
 description: Realistic duel system for Paper servers
 website: https://github.com/angryguyy/AngryDuels
 softdepend: [ Vault, PlaceholderAPI ]
+folia-supported: false
 
 commands:
   duels:

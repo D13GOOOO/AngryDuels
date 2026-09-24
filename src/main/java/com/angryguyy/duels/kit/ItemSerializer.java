@@ -5,15 +5,14 @@ import io.papermc.paper.registry.RegistryKey;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionType;
-import org.bukkit.configuration.ConfigurationSection;
-import java.util.LinkedHashMap;
 
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -44,18 +43,21 @@ public final class ItemSerializer {
     /**
      * Deserializes an item from a YAML map.
      *
-     * @param map configuration section values
+     * <p>The map may come from either {@code getValues(false)} on a
+     * configuration section or a plain Java map, since the caller is
+     * not required to normalize it beforehand.</p>
+     *
+     * @param map configuration values
      * @return the deserialized item
      * @throws IllegalArgumentException if the type is missing or
      *                                  invalid
      */
-    @SuppressWarnings("unchecked")
     public static ItemStack fromMap(Map<String, Object> map) {
         String typeName = (String) map.get("type");
         if (typeName == null) {
             throw new IllegalArgumentException("Missing 'type'");
         }
-        Material material = Material.matchMaterial(typeName.toUpperCase(Locale.ROOT));
+        Material material = Material.matchMaterial(typeName);
         if (material == null) {
             throw new IllegalArgumentException("Unknown material: " + typeName);
         }
@@ -66,7 +68,7 @@ public final class ItemSerializer {
 
         Object rawEnchants = map.get("enchants");
         if (rawEnchants != null && meta != null) {
-            Map<String, Object> enchMap = toMap(rawEnchants);
+            Map<String, Object> enchMap = normalizeMap(rawEnchants);
             if (enchMap != null) {
                 for (Map.Entry<String, Object> e : enchMap.entrySet()) {
                     String key = e.getKey().toLowerCase(Locale.ROOT);
@@ -105,28 +107,6 @@ public final class ItemSerializer {
     }
 
     /**
-     * Placeholder for the future kit editor: serializes an item back
-     * to the readable kit format.
-     *
-     * @param item item to serialize
-     * @return a map representation of the item
-     */
-    public static Map<String, Object> toMap(ItemStack item) {
-        throw new UnsupportedOperationException(
-                "ItemSerialization.toMap is reserved for the kit editor");
-    }
-
-    /**
-     * Reserved for a future version of the kit format that supports
-     * lore. Currently returns an empty list when invoked.
-     *
-     * @return an empty immutable list
-     */
-    public static List<String> emptyLore() {
-        return List.of();
-    }
-
-    /**
      * Normalizes a nested value to a string-keyed map.
      *
      * <p>Bukkit's {@code getValues(false)} returns nested sections as
@@ -138,7 +118,7 @@ public final class ItemSerializer {
      * @param raw raw value, usually a section or a map
      * @return a normalized map, or {@code null} if the value is neither
      */
-    private static Map<String, Object> toMap(Object raw) {
+    private static Map<String, Object> normalizeMap(Object raw) {
         if (raw instanceof Map<?, ?> m) {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> e : m.entrySet()) {
@@ -151,5 +131,4 @@ public final class ItemSerializer {
         }
         return null;
     }
-
 }

@@ -21,6 +21,13 @@ import java.util.UUID;
  * rewritten on every capture and every restore so that a server crash
  * during a duel does not lose the original player state.</p>
  *
+ * <p>The on-disk mirror is written synchronously on the main thread.
+ * This is acceptable because the file is small, but it means a single
+ * capture or restore can block the server for the duration of a disk
+ * write. If inventories grow into the hundreds of items in a future
+ * iteration, the write should be moved to an async task guarded by a
+ * dirty flag.</p>
+ *
  * <p>On startup, {@link #loadAll()} reads the file and repopulates the
  * in-memory map without applying any snapshot. Snapshots are then
  * applied by the join listener when the affected player reconnects,
@@ -122,16 +129,25 @@ public class SnapshotManager {
     /**
      * Schedules a restore to run after the given delay.
      *
-     * <p>Using a delayed task ensures the restore is applied after any
-     * vanilla logic that runs in the same tick as the triggering event.</p>
+     * <p>The player is re-fetched by uuid inside the scheduled task,
+     * so a disconnect-and-reconnect cycle between scheduling and
+     * execution is handled correctly and the snapshot is applied to the
+     * new player instance.</p>
+     *
+     * <p>Using a delayed task also ensures the restore is applied after
+     * any vanilla logic that runs in the same tick as the triggering
+     * event, which is required when a snapshot is restored right after
+     * a respawn.</p>
      *
      * @param player     player to restore
      * @param delayTicks delay in ticks before the restore runs
      */
     public void scheduleRestore(Player player, long delayTicks) {
+        UUID uuid = player.getUniqueId();
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline()) {
-                restore(player);
+            Player current = Bukkit.getPlayer(uuid);
+            if (current != null && current.isOnline()) {
+                restore(current);
             }
         }, delayTicks);
     }
@@ -146,6 +162,15 @@ public class SnapshotManager {
     public void clearAll() {
         pending.clear();
         save();
+    }
+
+    /**
+     * Returns the number of snapshots waiting to be restored.
+     *
+     * @return pending snapshot count
+     */
+    public int pendingCount() {
+        return pending.size();
     }
 
     /**
@@ -165,9 +190,5 @@ public class SnapshotManager {
         } catch (IOException e) {
             Log.error(e, "Failed to save snapshots.yml");
         }
-    }
-
-    public int pendingCount() {
-        return pending.size();
     }
 }

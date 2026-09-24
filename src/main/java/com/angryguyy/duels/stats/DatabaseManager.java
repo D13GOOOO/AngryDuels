@@ -14,6 +14,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -38,14 +39,15 @@ import java.util.stream.Collectors;
  *     configured connection timeout.</li>
  * </ul>
  *
- * <p>When a query fails because the database is down, the caller may push
- * the operation into the retry queue. The scheduled task drains the queue
- * every few seconds until the connection is restored.</p>
+ * <p>The retry queue is thread-safe and may be filled from any thread.
+ * The drain task runs asynchronously and periodically, and re-inserts
+ * any operation that fails so that no data is silently lost.</p>
  */
 public class DatabaseManager {
 
     private final DuelsPlugin plugin;
-    private final List<Consumer<Connection>> retryQueue = new ArrayList<>();
+    private final List<Consumer<Connection>> retryQueue =
+            Collections.synchronizedList(new ArrayList<>());
 
     private HikariDataSource dataSource;
     private boolean ready;
@@ -107,6 +109,11 @@ public class DatabaseManager {
      * call rather than through the pool, because the pool URL requires
      * the database to already exist.</p>
      *
+     * <p>The database name is sanitized before being embedded in the
+     * statement: any backtick is stripped, since MySQL uses backticks as
+     * the identifier delimiter and an unsanitized name would allow SQL
+     * injection through the config file.</p>
+     *
      * @param host MySQL host
      * @param port MySQL port
      * @param db   database name to create if missing
@@ -120,9 +127,10 @@ public class DatabaseManager {
             throws SQLException {
         String url = "jdbc:mysql://" + host + ":" + port + "/?useSSL=" + ssl
                 + "&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+        String safeDb = db.replace("`", "");
         try (Connection conn = DriverManager.getConnection(url, user, pass);
              Statement st = conn.createStatement()) {
-            st.executeUpdate("CREATE DATABASE IF NOT EXISTS `" + db
+            st.executeUpdate("CREATE DATABASE IF NOT EXISTS `" + safeDb
                     + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
     }
@@ -131,9 +139,9 @@ public class DatabaseManager {
      * Opens the HikariCP pool against the target database.
      *
      * <p>The timeouts are chosen to be tolerant of slow first responses
-     * from a local MySQL instance. In particular, {@code minimumIdle}
-     * and {@code keepaliveTime} are intentionally left at their defaults,
-     * because forcing eagerly-created idle connections can cause the
+     * from a local MySQL instance. {@code minimumIdle} and
+     * {@code keepaliveTime} are intentionally left at their HikariCP
+     * defaults, because eagerly-created idle connections can cause the
      * pool to fail initialization on slower machines.</p>
      *
      * @param host     MySQL host
@@ -208,14 +216,21 @@ public class DatabaseManager {
      * when the queue is empty or when {@link #ping()} reports that MySQL
      * is still unreachable. Operations that fail during the drain are
      * re-inserted into the queue so that no data is lost.</p>
+     *
+     * <p>The queue is copied under its own lock before being drained, so
+     * concurrent producers calling {@link #queue(Consumer)} while the
+     * task is running do not cause lost updates or iteration errors.</p>
      */
     private void startRetryTask() {
         plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, () -> {
             if (retryQueue.isEmpty()) return;
             if (!ping()) return;
 
-            List<Consumer<Connection>> snapshot = new ArrayList<>(retryQueue);
-            retryQueue.clear();
+            List<Consumer<Connection>> snapshot;
+            synchronized (retryQueue) {
+                snapshot = new ArrayList<>(retryQueue);
+                retryQueue.clear();
+            }
 
             for (Consumer<Connection> op : snapshot) {
                 try (Connection conn = dataSource.getConnection()) {
@@ -287,10 +302,22 @@ public class DatabaseManager {
      * are responsible for keeping the closure free of any state that
      * could become stale between the failure and the retry.</p>
      *
+     * <p>This method is thread-safe.</p>
+     *
      * @param op operation to retry later
      */
     public void queue(Consumer<Connection> op) {
         retryQueue.add(op);
+    }
+
+    /**
+     * Returns the number of operations currently waiting in the retry
+     * queue.
+     *
+     * @return pending retry count
+     */
+    public int retryQueueSize() {
+        return retryQueue.size();
     }
 
     /**

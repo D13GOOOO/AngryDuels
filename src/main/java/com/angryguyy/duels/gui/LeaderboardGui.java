@@ -23,11 +23,15 @@ import java.util.List;
  * controls for switching category and page. Rows 0-4 hold up to 45
  * entries as player heads, each showing rank, name and the value for
  * the current category.</p>
+ *
+ * <p>The page number is clamped to the valid range before the GUI is
+ * built, so an out-of-range page always results in a valid, non-empty
+ * view. Navigation arrows always reopen the inventory with the
+ * requested page, delegating the clamping logic to this class.</p>
  */
 public final class LeaderboardGui {
 
     private static final int SIZE = 54;
-    private static final int ENTRIES_PER_ROW = 9;
     private static final int MAX_ENTRIES = 45;
 
     private LeaderboardGui() {
@@ -39,21 +43,24 @@ public final class LeaderboardGui {
      * @param plugin   owning plugin
      * @param viewer   player viewing the GUI
      * @param category category to display
-     * @param page     one-based page number
+     * @param page     one-based page number, clamped to the valid range
      */
     public static void open(DuelsPlugin plugin, Player viewer,
                             LeaderboardCategory category, int page) {
+        int totalPages = plugin.leaderboards().totalPages(category);
+        int safePage = Math.max(1, Math.min(page, totalPages));
+
         LeaderboardGuiHolder holder = new LeaderboardGuiHolder(
-                viewer.getUniqueId(), category, page);
+                viewer.getUniqueId(), category, safePage);
 
         Component title = MiniMessage.miniMessage().deserialize(
                 "<dark_gray>» <gold><bold>" + category.getLabel()
-                        + "</bold></gold> <gray>· page " + page + " <dark_gray>«");
+                        + "</bold></gold> <gray>· page " + safePage + " <dark_gray>«");
 
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
         holder.setInventory(inv);
 
-        List<LeaderboardEntry> entries = plugin.leaderboards().getPage(category, page);
+        List<LeaderboardEntry> entries = plugin.leaderboards().getPage(category, safePage);
         for (int i = 0; i < entries.size() && i < MAX_ENTRIES; i++) {
             inv.setItem(i, buildEntryItem(entries.get(i)));
         }
@@ -62,7 +69,7 @@ public final class LeaderboardGui {
             inv.setItem(slot, filler());
         }
 
-        addNavigation(inv, viewer, category, page);
+        addNavigation(inv, category, safePage, totalPages);
         viewer.openInventory(inv);
     }
 
@@ -93,13 +100,14 @@ public final class LeaderboardGui {
     /**
      * Adds the navigation row: previous page, category switch, next page.
      *
-     * @param inv      inventory to modify
-     * @param viewer   viewer used to resolve permissions
-     * @param category current category
-     * @param page     current page
+     * @param inv        inventory to modify
+     * @param category   current category, highlighted in the compass lore
+     * @param page       current page, one-based
+     * @param totalPages total number of available pages
      */
-    private static void addNavigation(Inventory inv, Player viewer,
-                                      LeaderboardCategory category, int page) {
+    private static void addNavigation(Inventory inv,
+                                      LeaderboardCategory category,
+                                      int page, int totalPages) {
         MiniMessage mm = MiniMessage.miniMessage();
 
         ItemStack prev = new ItemStack(Material.ARROW);
@@ -127,6 +135,8 @@ public final class LeaderboardGui {
                 String prefix = c == category ? "<green>▶ " : "<gray>  ";
                 lore.add(mm.deserialize(prefix + c.getLabel()));
             }
+            lore.add(Component.empty());
+            lore.add(mm.deserialize("<gray>Page <white>" + page + "</white>/<white>" + totalPages + "</white>"));
             swMeta.lore(lore);
             switcher.setItemMeta(swMeta);
         }
@@ -146,23 +156,5 @@ public final class LeaderboardGui {
             pane.setItemMeta(meta);
         }
         return pane;
-    }
-
-    /**
-     * Returns the slot index of the first entry, for use by listeners.
-     *
-     * @return first entry slot
-     */
-    public static int firstEntrySlot() {
-        return 0;
-    }
-
-    /**
-     * Returns the number of entries per row.
-     *
-     * @return entries per row
-     */
-    public static int entriesPerRow() {
-        return ENTRIES_PER_ROW;
     }
 }

@@ -5,7 +5,6 @@
 
 settings:
   debug: false
-  language: en
 
 duel:
   request-timeout-seconds: 30
@@ -16,7 +15,6 @@ duel:
 world:
   name: duels_world
   auto-create: true
-  generator: void
 
 storage:
   type: mysql

@@ -2,11 +2,11 @@ package com.angryguyy.duels.snapshot;
 
 import io.papermc.paper.registry.RegistryAccess;
 import io.papermc.paper.registry.RegistryKey;
-import org.bukkit.attribute.Attribute;
-import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.serialization.ConfigurationSerializable;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -16,20 +16,29 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Immutable snapshot of the state of a player captured before entering a
- * duel and applied back once the duel ends.
+ * Snapshot of the state of a player captured before entering a duel
+ * and applied back once the duel ends.
  *
  * <p>The snapshot covers everything that the duel flow mutates or may
  * mutate: inventory, armor, offhand, ender chest, XP level and points,
  * active potion effects, health, hunger, saturation, exhaustion,
- * gamemode, fire ticks, remaining air, and the exact location the player
- * was standing at, including yaw and pitch.</p>
+ * gamemode, fire ticks, remaining air, and the exact location the
+ * player was standing at, including yaw and pitch.</p>
+ *
+ * <p>The class is effectively immutable once constructed: every getter
+ * that exposes a mutable value (arrays, lists, locations) returns a
+ * defensive copy or an unmodifiable view, so callers cannot corrupt
+ * the snapshot by mutating the returned object. The only exception is
+ * the array elements returned by {@link #getInventory()} and similar
+ * methods, which are cloned individually to keep the contract cheap
+ * to honor.</p>
  *
  * <p>The class implements {@link ConfigurationSerializable} so that it
  * can be written to and read from YAML without custom conversion logic.
@@ -118,10 +127,11 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
      *
      * <p>Inventory, armor, offhand, and ender chest arrays are cloned
      * element-by-element so that later mutations of the player's real
-     * inventory do not leak into the snapshot.</p>
+     * inventory do not leak into the snapshot. The location is also
+     * cloned for the same reason.</p>
      *
      * @param player player to capture
-     * @return an immutable snapshot representing the player state
+     * @return a snapshot representing the player state at capture time
      */
     public static PlayerSnapshot capture(Player player) {
         ItemStack[] inv = player.getInventory().getContents();
@@ -176,39 +186,39 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
     }
 
     /**
-     * Returns the cloned inventory contents.
+     * Returns a defensive copy of the captured inventory contents.
      *
-     * @return inventory array
+     * @return cloned inventory array
      */
     public ItemStack[] getInventory() {
-        return inventory;
+        return cloneArray(inventory);
     }
 
     /**
-     * Returns the cloned armor contents.
+     * Returns a defensive copy of the captured armor contents.
      *
-     * @return armor array
+     * @return cloned armor array
      */
     public ItemStack[] getArmor() {
-        return armor;
+        return cloneArray(armor);
     }
 
     /**
-     * Returns the offhand item.
+     * Returns a defensive copy of the captured offhand item.
      *
-     * @return offhand item, or {@code null}
+     * @return cloned offhand item, or {@code null}
      */
     public @Nullable ItemStack getOffhand() {
-        return offhand;
+        return offhand == null ? null : offhand.clone();
     }
 
     /**
-     * Returns the cloned ender chest contents.
+     * Returns a defensive copy of the captured ender chest contents.
      *
-     * @return ender chest array
+     * @return cloned ender chest array
      */
     public ItemStack[] getEnderChest() {
-        return enderChest;
+        return cloneArray(enderChest);
     }
 
     /**
@@ -239,12 +249,15 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
     }
 
     /**
-     * Returns the active potion effects.
+     * Returns an unmodifiable view of the captured potion effects.
      *
-     * @return list of effects
+     * <p>The returned list cannot be mutated; individual effects are
+     * immutable by Bukkit contract.</p>
+     *
+     * @return unmodifiable list of effects
      */
     public List<PotionEffect> getEffects() {
-        return effects;
+        return Collections.unmodifiableList(effects);
     }
 
     /**
@@ -311,12 +324,12 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
     }
 
     /**
-     * Returns the captured location.
+     * Returns a defensive copy of the captured location.
      *
-     * @return location
+     * @return cloned location
      */
     public Location getLocation() {
-        return location;
+        return location.clone();
     }
 
     /**
@@ -469,6 +482,10 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
      * remaining air are reset last to avoid the server overwriting them
      * during the same tick.</p>
      *
+     * <p>The maximum health is read from the {@code MAX_HEALTH} attribute
+     * rather than from the deprecated {@code getMaxHealth()} helper, so
+     * that modifiers applied by other plugins are respected.</p>
+     *
      * @param player player to restore
      */
     public void apply(Player player) {
@@ -495,6 +512,7 @@ public final class PlayerSnapshot implements ConfigurationSerializable {
         player.setFoodLevel(foodLevel);
         player.setSaturation(saturation);
         player.setExhaustion(exhaustion);
+
         AttributeInstance maxHealthAttr = player.getAttribute(Attribute.MAX_HEALTH);
         double maxHealth = maxHealthAttr != null ? maxHealthAttr.getValue() : 20.0;
         player.setHealth(Math.min(health, maxHealth));

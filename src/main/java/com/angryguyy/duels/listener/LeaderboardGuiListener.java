@@ -4,6 +4,7 @@ import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.gui.LeaderboardGuiHolder;
 import com.angryguyy.duels.stats.LeaderboardCategory;
 import com.angryguyy.duels.stats.LeaderboardManager;
+import com.angryguyy.duels.gui.LeaderboardGui;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -43,6 +44,7 @@ public class LeaderboardGuiListener implements Listener {
 
         event.setCancelled(true);
         if (!(event.getWhoClicked() instanceof Player viewer)) return;
+        if (!viewer.isOnline()) return;
         if (!viewer.getUniqueId().equals(gui.getViewer())) return;
 
         LeaderboardManager manager = plugin.leaderboards();
@@ -50,15 +52,15 @@ public class LeaderboardGuiListener implements Listener {
 
         if (slot == 48) {
             int newPage = Math.max(1, gui.getPage() - 1);
-            com.angryguyy.duels.gui.LeaderboardGui.open(plugin, viewer, gui.getCategory(), newPage);
+            LeaderboardGui.open(plugin, viewer, gui.getCategory(), newPage);
         } else if (slot == 50) {
             int max = manager.totalPages(gui.getCategory());
             int newPage = Math.min(max, gui.getPage() + 1);
-            com.angryguyy.duels.gui.LeaderboardGui.open(plugin, viewer, gui.getCategory(), newPage);
+            LeaderboardGui.open(plugin, viewer, gui.getCategory(), newPage);
         } else if (slot == 49) {
             LeaderboardCategory[] all = LeaderboardCategory.values();
             int next = (gui.getCategory().ordinal() + 1) % all.length;
-            com.angryguyy.duels.gui.LeaderboardGui.open(plugin, viewer, all[next], 1);
+            LeaderboardGui.open(plugin, viewer, all[next], 1);
         }
     }
 
