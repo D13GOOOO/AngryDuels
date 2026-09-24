@@ -17,6 +17,9 @@ repositories {
         name = 'jitpack'
         url = 'https://jitpack.io'
     }
+    maven {
+        url = 'https://repo.helpch.at/releases'
+    }
 }
 
 dependencies {
@@ -24,6 +27,8 @@ dependencies {
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
+    implementation 'com.zaxxer:HikariCP:5.1.0'
+    compileOnly 'me.clip:placeholderapi:2.11.6'
 }
 
 java {
@@ -47,6 +52,8 @@ tasks.named('processResources') {
 
 shadowJar {
     archiveClassifier.set('')
+    archiveBaseName.set('AngryDuels')
+    relocate 'com.zaxxer.hikari', 'com.angryguyy.duels.libs.hikari'
     minimize()
 }
 

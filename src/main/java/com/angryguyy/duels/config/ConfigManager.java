@@ -235,4 +235,16 @@ public class ConfigManager {
     public boolean mysqlUseSsl() {
         return raw().getBoolean("storage.mysql.use-ssl", false);
     }
+
+    public boolean statsEnabled() {
+        return raw().getBoolean("stats.enabled", true);
+    }
+
+    public int leaderboardEntriesPerPage() {
+        return raw().getInt("stats.leaderboard.entries-per-page", 10);
+    }
+
+    public int leaderboardRefreshMinutes() {
+        return raw().getInt("stats.leaderboard.refresh-minutes", 2);
+    }
 }

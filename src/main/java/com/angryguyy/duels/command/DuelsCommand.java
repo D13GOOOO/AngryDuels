@@ -4,6 +4,8 @@ import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.arena.Arena;
 import com.angryguyy.duels.gui.KitSelectionGui;
+import com.angryguyy.duels.stats.LeaderboardCategory;
+import org.bukkit.OfflinePlayer;
 import java.util.stream.Stream;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -19,6 +21,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Handler for the {@code /duel} command and its subcommands.
@@ -78,6 +82,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             case "deny" -> handleDeny(sender);
             case "forfeit" -> handleForfeit(sender);
             case "arena" -> handleArena(sender, args);
+            case "stats" -> handleStats(sender, args);
+            case "top" -> handleTop(sender, args);
             default -> handlePlayerTarget(sender, args);
         }
         return true;
@@ -376,8 +382,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
                                                 @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            List<String> options = new ArrayList<>(List.of("help", "accept", "deny", "forfeit"));
-            if (sender.hasPermission("duels.admin")) {
+            List<String> options = new ArrayList<>(List.of("help", "accept", "deny", "forfeit", "stats", "top"));            if (sender.hasPermission("duels.admin")) {
                 options.add("reload");
                 options.add("arena");
             }
@@ -431,14 +436,198 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
                     .toList();
         }
 
+        if (args.length == 2 && args[0].equalsIgnoreCase("top")) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            java.util.List<String> cats = new ArrayList<>();
+            for (LeaderboardCategory c : LeaderboardCategory.values()) {
+                cats.add(c.getId());
+            }
+            return cats.stream().filter(s -> s.startsWith(prefix)).toList();
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("stats")
+                && sender.hasPermission("duels.admin")) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            return java.util.List.of("reset", "resetall").stream()
+                    .filter(s -> s.startsWith(prefix))
+                    .toList();
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("top")) {
+            String prefix = args[2].toLowerCase(Locale.ROOT);
+            return java.util.List.of("1", "2", "3", "gui").stream()
+                    .filter(s -> s.startsWith(prefix))
+                    .toList();
+        }
+
         return List.of();
     }
 
     private boolean isSubcommand(String arg) {
         return switch (arg.toLowerCase(Locale.ROOT)) {
-            case "help", "reload", "accept", "deny", "forfeit", "arena" -> true;
+            case "help", "reload", "accept", "deny", "forfeit", "arena", "stats", "top" -> true;
             default -> false;
         };
+    }
+
+    /**
+     * Dispatches the {@code stats} subcommand.
+     *
+     * @param sender source of the command
+     * @param args   full argument array
+     */
+    private void handleStats(CommandSender sender, String[] args) {
+        if (args.length >= 2 && (args[1].equalsIgnoreCase("reset")
+                || args[1].equalsIgnoreCase("resetall"))) {
+            handleStatsReset(sender, args);
+            return;
+        }
+
+        Player target;
+        if (args.length >= 2) {
+            target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                OfflinePlayer offline = Bukkit.getOfflinePlayerIfCached(args[1]);
+                if (offline == null || offline.getUniqueId() == null) {
+                    plugin.messages().send(sender, "duel.target-offline");
+                    return;
+                }
+                displayStats(sender, offline.getUniqueId(),
+                        offline.getName() != null ? offline.getName() : args[1]);
+                return;
+            }
+        } else {
+            target = requirePlayer(sender);
+            if (target == null) return;
+        }
+
+        displayStats(sender, target.getUniqueId(), target.getName());
+    }
+
+    /**
+     * Displays a stats snapshot to the sender.
+     *
+     * @param sender   receiver
+     * @param uuid     player uuid
+     * @param fallback username to display if the snapshot lacks one
+     */
+    private void displayStats(CommandSender sender, java.util.UUID uuid, String fallback) {
+        var snapshot = plugin.stats().readStats(uuid);
+        if (snapshot == null) {
+            plugin.messages().send(sender, "stats.not-found",
+                    java.util.Map.of("player", fallback));
+            return;
+        }
+
+        String name = snapshot.username() != null ? snapshot.username() : fallback;
+
+        java.util.Map<String, String> placeholders = new java.util.HashMap<>();
+        placeholders.put("player", name);
+        placeholders.put("wins", String.valueOf(snapshot.wins()));
+        placeholders.put("losses", String.valueOf(snapshot.losses()));
+        placeholders.put("played", String.valueOf(snapshot.totalDuels()));
+        placeholders.put("kills", String.valueOf(snapshot.kills()));
+        placeholders.put("deaths", String.valueOf(snapshot.deaths()));
+        placeholders.put("forfeits", String.valueOf(snapshot.forfeits()));
+        placeholders.put("quits", String.valueOf(snapshot.quits()));
+        placeholders.put("streak", String.valueOf(snapshot.streak()));
+        placeholders.put("best_streak", String.valueOf(snapshot.bestStreak()));
+        placeholders.put("winrate", String.format("%.1f", snapshot.winRate()));
+        placeholders.put("kdr", String.format("%.2f", snapshot.kdr()));
+
+        plugin.messages().sendList(sender, "stats.header",
+                java.util.Map.of("player", name));
+        plugin.messages().sendList(sender, "stats.body", placeholders);
+    }
+
+    /**
+     * Dispatches the {@code top} subcommand.
+     *
+     * @param sender source of the command
+     * @param args   full argument array
+     */
+    private void handleTop(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            plugin.messages().send(sender, "stats.top-usage");
+            return;
+        }
+        LeaderboardCategory category = LeaderboardCategory.fromString(args[1]);
+        if (category == null) {
+            plugin.messages().send(sender, "stats.top-unknown-category",
+                    java.util.Map.of("category", args[1]));
+            return;
+        }
+
+        if (args.length >= 3 && args[2].equalsIgnoreCase("gui")) {
+            Player p = requirePlayer(sender);
+            if (p == null) return;
+            com.angryguyy.duels.gui.LeaderboardGui.open(plugin, p, category, 1);
+            return;
+        }
+
+        int page = 1;
+        if (args.length >= 3) {
+            try {
+                page = Math.max(1, Integer.parseInt(args[2]));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        var entries = plugin.leaderboards().getPage(category, page);
+        if (entries.isEmpty()) {
+            plugin.messages().send(sender, "stats.top-empty");
+            return;
+        }
+
+        int totalPages = plugin.leaderboards().totalPages(category);
+        plugin.messages().send(sender, "stats.top-header", java.util.Map.of(
+                "category", category.getLabel(),
+                "page", String.valueOf(page),
+                "pages", String.valueOf(totalPages)
+        ));
+        for (var e : entries) {
+            plugin.messages().send(sender, "stats.top-entry", java.util.Map.of(
+                    "rank", String.valueOf(e.rank()),
+                    "player", e.username(),
+                    "value", String.valueOf(e.value())
+            ));
+        }
+    }
+
+    /**
+     * Handles the reset and resetall subcommands.
+     *
+     * @param sender source of the command
+     * @param args   full argument array
+     */
+    private void handleStatsReset(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("duels.admin")) {
+            plugin.messages().send(sender, "general.no-permission");
+            return;
+        }
+
+        if (args[1].equalsIgnoreCase("resetall")) {
+            plugin.stats().resetAll();
+            plugin.messages().send(sender, "stats.reset-all");
+            Log.info("All stats reset by %s", sender.getName());
+            return;
+        }
+
+        if (args.length < 3) {
+            plugin.messages().send(sender, "stats.reset-usage");
+            return;
+        }
+
+        OfflinePlayer target = Bukkit.getOfflinePlayerIfCached(args[2]);
+        if (target == null || target.getUniqueId() == null) {
+            plugin.messages().send(sender, "stats.not-found",
+                    java.util.Map.of("player", args[2]));
+            return;
+        }
+        plugin.stats().resetStats(target.getUniqueId());
+        plugin.messages().send(sender, "stats.reset-one",
+                java.util.Map.of("player", target.getName() != null ? target.getName() : args[2]));
+        Log.info("Stats reset for %s by %s", args[2], sender.getName());
     }
 
 }

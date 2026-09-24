@@ -54,3 +54,22 @@ arena:
 kit:
   not-found: "<red>Kit <white><kit></white> not found."
   no-permission: "<red>You don't have permission to use this kit."
+
+stats:
+  not-found: "<red>No stats found for <white><player></white>."
+  header:
+    - "<gold><bold>Stats of <white><player></white></bold></gold>"
+  body:
+    - "<gray>Wins: <green><wins></green> <dark_gray>|</dark_gray> Losses: <red><losses></red> <dark_gray>|</dark_gray> Played: <white><played></white>"
+    - "<gray>Kills: <green><kills></green> <dark_gray>|</dark_gray> Deaths: <red><deaths></red> <dark_gray>|</dark_gray> K/D: <white><kdr></white>"
+    - "<gray>Forfeits: <white><forfeits></white> <dark_gray>|</dark_gray> Quits: <white><quits></white>"
+    - "<gray>Streak: <yellow><streak></yellow> <dark_gray>|</dark_gray> Best: <gold><best_streak></gold>"
+    - "<gray>Win rate: <white><winrate>%</white>"
+  top-usage: "<gray>Usage: <white>/duel top <wins|losses|played|streak|beststreak|kdr> [page|gui]"
+  top-unknown-category: "<red>Unknown category <white><category></white>."
+  top-empty: "<yellow>No entries to display."
+  top-header: "<gold><bold><category></bold></gold> <gray>· page <white><page></white>/<white><pages></white>"
+  top-entry: "<gray>#<white><rank></white> <dark_gray>|</dark_gray> <yellow><player></yellow> <dark_gray>-</dark_gray> <white><value></white>"
+  reset-all: "<green>All stats have been reset."
+  reset-one: "<green>Stats of <white><player></white> have been reset."
+  reset-usage: "<gray>Usage: <white>/duel stats reset <player></white>"

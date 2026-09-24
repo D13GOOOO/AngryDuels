@@ -82,3 +82,18 @@ rewards:
       - type: item
         material: DIAMOND
         amount: 3
+
+# ================================================================
+#  Stats
+#
+#  enabled           - master switch for MySQL statistics
+#  entries-per-page  - entries shown per leaderboard page
+#  refresh-minutes   - how often the leaderboard cache is refreshed
+#
+#  Requires the storage.mysql block above to be configured.
+# ================================================================
+stats:
+  enabled: true
+  leaderboard:
+    entries-per-page: 10
+    refresh-minutes: 2

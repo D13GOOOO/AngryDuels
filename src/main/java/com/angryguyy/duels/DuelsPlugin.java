@@ -12,11 +12,16 @@ import com.angryguyy.duels.listener.PlayerJoinListener;
 import com.angryguyy.duels.listener.PlayerQuitListener;
 import com.angryguyy.duels.listener.PlayerRespawnListener;
 import com.angryguyy.duels.listener.KitGuiListener;
+import com.angryguyy.duels.listener.LeaderboardGuiListener;
 import com.angryguyy.duels.snapshot.SnapshotManager;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.world.DuelWorldManager;
 import com.angryguyy.duels.listener.DuelRewardListener;
 import com.angryguyy.duels.reward.RewardManager;
+import com.angryguyy.duels.stats.DatabaseManager;
+import com.angryguyy.duels.stats.StatsManager;
+import com.angryguyy.duels.stats.LeaderboardManager;
+import com.angryguyy.duels.listener.DuelStatsListener;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -41,6 +46,9 @@ public final class DuelsPlugin extends JavaPlugin {
     private SnapshotManager snapshotManager;
     private KitManager kitManager;
     private RewardManager rewardManager;
+    private DatabaseManager databaseManager;
+    private StatsManager statsManager;
+    private LeaderboardManager leaderboardManager;
 
     /**
      * Called by the server when the plugin is enabled.
@@ -63,8 +71,18 @@ public final class DuelsPlugin extends JavaPlugin {
         kitManager.load();
         this.rewardManager = new RewardManager(this);
         rewardManager.load();
+        this.databaseManager = new DatabaseManager(this);
+        this.statsManager = new StatsManager(this, databaseManager);
+        databaseManager.init();
+        this.leaderboardManager = new LeaderboardManager(this, databaseManager);
+        leaderboardManager.start();
         this.snapshotManager = new SnapshotManager(this);
         snapshotManager.loadAll();
+
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new com.angryguyy.duels.hook.AngryDuelsExpansion(this).register();
+            Log.info("PlaceholderAPI expansion registered.");
+        }
 
         this.duelManager = new DuelManager(this);
         duelManager.start();
@@ -83,6 +101,8 @@ public final class DuelsPlugin extends JavaPlugin {
      */
     @Override
     public void onDisable() {
+        if (leaderboardManager != null) leaderboardManager.shutdown();
+        if (databaseManager != null) databaseManager.shutdown();
         if (duelManager != null) duelManager.shutdown();
         instance = null;
     }
@@ -112,6 +132,8 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DuelProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new KitGuiListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelRewardListener(this), this);
+        getServer().getPluginManager().registerEvents(new DuelStatsListener(this), this);
+        getServer().getPluginManager().registerEvents(new LeaderboardGuiListener(this), this);
     }
 
     public static DuelsPlugin getInstance() { return instance; }
@@ -122,6 +144,8 @@ public final class DuelsPlugin extends JavaPlugin {
     public ArenaManager arenas() { return arenaManager; }
     public SnapshotManager snapshots() { return snapshotManager; }
     public KitManager kits() { return kitManager; }
-    public RewardManager rewards() { return rewardManager;
-    }
+    public RewardManager rewards() { return rewardManager; }
+    public StatsManager stats() { return statsManager; }
+    public DatabaseManager database() { return databaseManager; }
+    public LeaderboardManager leaderboards() { return leaderboardManager; }
 }

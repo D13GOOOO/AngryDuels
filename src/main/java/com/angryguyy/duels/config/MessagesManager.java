@@ -168,4 +168,32 @@ public class MessagesManager {
             sender.sendMessage(mm.deserialize(line));
         }
     }
+
+    /**
+     * Sends every line of a message list stored at the given key, with
+     * placeholders substituted into each line.
+     *
+     * <p>Unlike {@link #send(CommandSender, String)}, this method does
+     * not prepend the prefix, since lists are commonly used for
+     * structured output such as help pages or leaderboards.</p>
+     *
+     * @param sender       receiver of the messages
+     * @param key          dotted path inside {@code messages.yml}
+     * @param placeholders placeholder values, or {@code null} for none
+     */
+    public void sendList(CommandSender sender, String key, Map<String, String> placeholders) {
+        List<String> lines = messages.getStringList(key);
+        if (lines.isEmpty()) {
+            sender.sendMessage(mm.deserialize("<red>[missing message list: " + key + "]"));
+            return;
+        }
+        TagResolver.Builder builder = TagResolver.builder();
+        if (placeholders != null) {
+            placeholders.forEach((k, v) -> builder.resolver(Placeholder.unparsed(k, v)));
+        }
+        TagResolver resolver = builder.build();
+        for (String line : lines) {
+            sender.sendMessage(mm.deserialize(line, resolver));
+        }
+    }
 }
