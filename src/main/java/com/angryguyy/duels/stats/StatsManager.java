@@ -8,16 +8,21 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Provides read and write access to duel statistics.
  *
  * <p>Writes are performed asynchronously through the {@link DatabaseManager}
- * pool. If a write fails because the database is unreachable, the
- * operation is queued for retry. Reads are performed synchronously and
- * return {@code null} when the database is not available.</p>
+ * pool. If a write fails because the database is unreachable, the whole
+ * transaction is queued for retry and re-executed later by the retry task.
+ * Reads are performed synchronously and return {@code null} when the
+ * database is not available.</p>
+ *
+ * <p>The manager never throws SQL exceptions to its callers. Database
+ * errors are logged and, where appropriate, queued for retry, so that a
+ * temporary outage does not propagate into the duel flow.</p>
  */
 public class StatsManager {
 
@@ -36,46 +41,95 @@ public class StatsManager {
     }
 
     /**
-     * Ensures a player row exists, then updates both aggregated stats
-     * and kit-specific stats after a duel.
+     * Records a completed duel in the database.
      *
-     * @param winnerUuid  winner uuid
-     * @param winnerName  winner username
-     * @param loserUuid   loser uuid, or {@code null}
-     * @param loserName   loser username, or {@code null}
-     * @param kitId       kit id, or {@code null}
-     * @param arenaId     arena id, or {@code null}
-     * @param duration    duel duration in seconds
-     * @param reason      end reason name
+     * <p>The write is performed in a single transaction on an async
+     * thread. The readiness check is intentionally performed inside the
+     * async task, so that no database-related work ever touches the main
+     * thread. If the write fails because the database is unreachable,
+     * the whole transaction is re-queued and retried later by the
+     * {@link DatabaseManager} retry task.</p>
+     *
+     * @param winnerUuid winner uuid
+     * @param winnerName winner username
+     * @param loserUuid  loser uuid, or {@code null}
+     * @param loserName  loser username, or {@code null}
+     * @param kitId      kit id, or {@code null}
+     * @param arenaId    arena id, or {@code null}
+     * @param duration   duel duration in seconds
+     * @param reason     end reason name
      */
     public void recordDuel(UUID winnerUuid, String winnerName,
                            UUID loserUuid, String loserName,
                            String kitId, String arenaId,
                            long duration, String reason) {
-        if (!database.isReady()) return;
-
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            if (!database.isReady()) return;
             try (Connection conn = database.getDataSource().getConnection()) {
-                conn.setAutoCommit(false);
-                upsertPlayer(conn, winnerUuid, winnerName);
-                if (loserUuid != null) upsertPlayer(conn, loserUuid, loserName);
-                updateWinnerStats(conn, winnerUuid);
-                if (loserUuid != null) updateLoserStats(conn, loserUuid);
-                if (kitId != null) {
-                    updateKitStats(conn, winnerUuid, kitId, true);
-                    if (loserUuid != null) updateKitStats(conn, loserUuid, kitId, false);
-                }
-                insertHistory(conn, winnerUuid, loserUuid, kitId, arenaId, duration, reason);
-                conn.commit();
+                doRecord(conn, winnerUuid, winnerName, loserUuid, loserName,
+                        kitId, arenaId, duration, reason);
             } catch (SQLException e) {
                 Log.error(e, "Failed to record duel stats; queueing for retry.");
                 database.queue(conn -> {
-                    // Retry logic omitted for brevity; same statements re-executed.
+                    try {
+                        doRecord(conn, winnerUuid, winnerName, loserUuid, loserName,
+                                kitId, arenaId, duration, reason);
+                    } catch (SQLException ex) {
+                        Log.error(ex, "Retry failed for duel stats.");
+                    }
                 });
             }
         });
     }
 
+    /**
+     * Performs the full duel transaction on the given connection.
+     *
+     * <p>Every statement runs inside a single transaction opened in
+     * {@code autocommit=false} mode. The transaction is committed at the
+     * end; if any statement throws, the connection is closed without a
+     * commit, effectively rolling back all changes.</p>
+     *
+     * @param conn       active connection
+     * @param winnerUuid winner uuid
+     * @param winnerName winner username
+     * @param loserUuid  loser uuid, or {@code null}
+     * @param loserName  loser username, or {@code null}
+     * @param kitId      kit id, or {@code null}
+     * @param arenaId    arena id, or {@code null}
+     * @param duration   duel duration in seconds
+     * @param reason     end reason name
+     * @throws SQLException if any statement fails
+     */
+    private void doRecord(Connection conn, UUID winnerUuid, String winnerName,
+                          UUID loserUuid, String loserName,
+                          String kitId, String arenaId,
+                          long duration, String reason) throws SQLException {
+        conn.setAutoCommit(false);
+        upsertPlayer(conn, winnerUuid, winnerName);
+        if (loserUuid != null) upsertPlayer(conn, loserUuid, loserName);
+        updateWinnerStats(conn, winnerUuid, reason);
+        if (loserUuid != null) updateLoserStats(conn, loserUuid, reason);
+        if (kitId != null) {
+            updateKitStats(conn, winnerUuid, kitId, true);
+            if (loserUuid != null) updateKitStats(conn, loserUuid, kitId, false);
+        }
+        insertHistory(conn, winnerUuid, loserUuid, kitId, arenaId, duration, reason);
+        conn.commit();
+    }
+
+    /**
+     * Ensures the player row and its stats companion row exist.
+     *
+     * <p>The player row is upserted with the latest username; the stats
+     * row is inserted only if missing, so existing counters are never
+     * overwritten by this call.</p>
+     *
+     * @param conn active connection
+     * @param uuid player uuid
+     * @param name last known username
+     * @throws SQLException if the upsert fails
+     */
     private void upsertPlayer(Connection conn, UUID uuid, String name) throws SQLException {
         String sql = "INSERT INTO duels_players (uuid, username) VALUES (?, ?) "
                 + "ON DUPLICATE KEY UPDATE username = VALUES(username), last_seen = CURRENT_TIMESTAMP";
@@ -91,10 +145,27 @@ public class StatsManager {
         }
     }
 
-    private void updateWinnerStats(Connection conn, UUID uuid) throws SQLException {
-        String sql = "UPDATE duels_stats SET wins = wins + 1, "
-                + "streak = streak + 1, "
-                + "best_streak = GREATEST(best_streak, streak + 1) "
+    /**
+     * Increments winner counters.
+     *
+     * <p>The order of assignments matters: MySQL evaluates SET clauses
+     * left to right and updates each column immediately. {@code best_streak}
+     * must be computed before {@code streak} is incremented, otherwise
+     * the GREATEST comparison would read the already-updated value and
+     * produce an off-by-one result.</p>
+     *
+     * @param conn   active connection
+     * @param uuid   winner uuid
+     * @param reason end reason
+     * @throws SQLException if the update fails
+     */
+    private void updateWinnerStats(Connection conn, UUID uuid, String reason) throws SQLException {
+        boolean killed = "PLAYER_DIED".equalsIgnoreCase(reason);
+        String sql = "UPDATE duels_stats SET "
+                + "wins = wins + 1, "
+                + (killed ? "kills = kills + 1, " : "")
+                + "best_streak = GREATEST(best_streak, streak + 1), "
+                + "streak = streak + 1 "
                 + "WHERE uuid = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
@@ -102,14 +173,45 @@ public class StatsManager {
         }
     }
 
-    private void updateLoserStats(Connection conn, UUID uuid) throws SQLException {
-        String sql = "UPDATE duels_stats SET losses = losses + 1, streak = 0 WHERE uuid = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+    /**
+     * Increments loser counters.
+     *
+     * <p>The counter incremented depends on the end reason: a death for
+     * {@code PLAYER_DIED}, a forfeit for {@code FORFEIT}, and a quit
+     * for {@code PLAYER_QUIT}. Losses are always incremented and the
+     * streak is always reset to zero.</p>
+     *
+     * @param conn   active connection
+     * @param uuid   loser uuid
+     * @param reason end reason
+     * @throws SQLException if the update fails
+     */
+    private void updateLoserStats(Connection conn, UUID uuid, String reason) throws SQLException {
+        boolean died = "PLAYER_DIED".equalsIgnoreCase(reason);
+        boolean forfeited = "FORFEIT".equalsIgnoreCase(reason);
+        boolean quit = "PLAYER_QUIT".equalsIgnoreCase(reason);
+
+        StringBuilder sql = new StringBuilder("UPDATE duels_stats SET losses = losses + 1, streak = 0");
+        if (died) sql.append(", deaths = deaths + 1");
+        if (forfeited) sql.append(", forfeits = forfeits + 1");
+        if (quit) sql.append(", quits = quits + 1");
+        sql.append(" WHERE uuid = ?");
+
+        try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
         }
     }
 
+    /**
+     * Increments the per-kit win or loss counter for a player.
+     *
+     * @param conn  active connection
+     * @param uuid  player uuid
+     * @param kitId kit id
+     * @param win   {@code true} for a win, {@code false} for a loss
+     * @throws SQLException if the upsert fails
+     */
     private void updateKitStats(Connection conn, UUID uuid, String kitId, boolean win) throws SQLException {
         String col = win ? "wins" : "losses";
         String sql = "INSERT INTO duels_kit_stats (uuid, kit_id, " + col + ") VALUES (?, ?, 1) "
@@ -121,6 +223,18 @@ public class StatsManager {
         }
     }
 
+    /**
+     * Inserts a row in the historical match log.
+     *
+     * @param conn     active connection
+     * @param winner   winner uuid
+     * @param loser    loser uuid, or {@code null}
+     * @param kit      kit id, or {@code null}
+     * @param arena    arena id, or {@code null}
+     * @param duration duel duration in seconds
+     * @param reason   end reason
+     * @throws SQLException if the insert fails
+     */
     private void insertHistory(Connection conn, UUID winner, UUID loser,
                                String kit, String arena, long duration, String reason)
             throws SQLException {
@@ -139,6 +253,11 @@ public class StatsManager {
 
     /**
      * Reads a full stats snapshot for a player.
+     *
+     * <p>The query is performed synchronously on the calling thread,
+     * which is acceptable because it is only triggered by player commands
+     * and reads a single row. Returns {@code null} if the player has no
+     * stats or the database is unavailable.</p>
      *
      * @param uuid player uuid
      * @return stats snapshot, or {@code null} if unavailable
@@ -169,13 +288,19 @@ public class StatsManager {
     }
 
     /**
-     * Resets a player's stats by deleting the player row (cascades).
+     * Resets a player's stats.
+     *
+     * <p>Deleting the row in {@code duels_players} cascades to
+     * {@code duels_stats} and {@code duels_kit_stats} thanks to the
+     * foreign key constraints, so a single delete is enough. The
+     * historical log is left untouched on purpose, so admins can still
+     * audit past duels.</p>
      *
      * @param uuid player uuid
      */
     public void resetStats(UUID uuid) {
-        if (!database.isReady()) return;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            if (!database.isReady()) return;
             try (Connection conn = database.getDataSource().getConnection();
                  PreparedStatement ps = conn.prepareStatement(
                          "DELETE FROM duels_players WHERE uuid = ?")) {
@@ -188,13 +313,17 @@ public class StatsManager {
     }
 
     /**
-     * Resets all stats by truncating every stats table.
+     * Resets every stats table.
+     *
+     * <p>The historical table is also truncated, so this method is
+     * intended for full wipes only. Foreign key checks are temporarily
+     * disabled to allow truncation in any order.</p>
      */
     public void resetAll() {
-        if (!database.isReady()) return;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            if (!database.isReady()) return;
             try (Connection conn = database.getDataSource().getConnection();
-                 java.sql.Statement st = conn.createStatement()) {
+                 Statement st = conn.createStatement()) {
                 st.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
                 st.executeUpdate("TRUNCATE TABLE duels_kit_stats");
                 st.executeUpdate("TRUNCATE TABLE duels_history");

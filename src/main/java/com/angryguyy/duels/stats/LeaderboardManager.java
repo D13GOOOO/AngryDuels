@@ -56,7 +56,10 @@ public class LeaderboardManager {
      * Starts the refresh task.
      *
      * <p>Performs an immediate refresh on the next async tick and then
-     * schedules a repeating refresh at the configured interval.</p>
+     * schedules a repeating refresh at the configured interval. The
+     * readiness check uses the cheap flag-only variant, since at this
+     * point the pool has just been created and the caller is on the
+     * main thread.</p>
      */
     public void start() {
         if (!database.isReady()) {
@@ -86,9 +89,14 @@ public class LeaderboardManager {
 
     /**
      * Refreshes every category in the cache.
+     *
+     * <p>Before each cycle, a real round-trip is performed against the
+     * database to check that it is actually reachable. If the ping fails
+     * the refresh is skipped, leaving the existing cached values in
+     * place; the next scheduled cycle will retry automatically.</p>
      */
     private void refreshAll() {
-        if (!database.isReady()) return;
+        if (!database.ping()) return;
         for (LeaderboardCategory category : LeaderboardCategory.values()) {
             try {
                 List<LeaderboardEntry> entries = fetch(category);

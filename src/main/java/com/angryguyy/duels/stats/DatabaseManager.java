@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -24,10 +25,21 @@ import java.util.stream.Collectors;
  * <p>On startup, the manager first connects to the MySQL server without
  * selecting a database and issues a {@code CREATE DATABASE IF NOT EXISTS}
  * statement. It then opens a HikariCP pool against the target database
- * and executes the bundled {@code schema.sql} to ensure all tables exist.</p>
+ * and executes the bundled {@code schema.sql} to ensure all tables exist.
+ * Finally, it schedules the retry task that drains the offline queue.</p>
+ *
+ * <p>Two distinct readiness concepts are exposed:</p>
+ * <ul>
+ *     <li>{@link #isReady()} is a cheap flag check, safe to call from the
+ *     main thread. It only says whether the pool has been initialized,
+ *     not whether MySQL is currently reachable.</li>
+ *     <li>{@link #ping()} performs a real round-trip and must only be
+ *     called from async threads, since it can block for up to the
+ *     configured connection timeout.</li>
+ * </ul>
  *
  * <p>When a query fails because the database is down, the caller may push
- * the operation into the retry queue. A scheduled task drains the queue
+ * the operation into the retry queue. The scheduled task drains the queue
  * every few seconds until the connection is restored.</p>
  */
 public class DatabaseManager {
@@ -49,7 +61,12 @@ public class DatabaseManager {
 
     /**
      * Initializes the database: creates the database if missing, opens
-     * the connection pool and applies the schema.
+     * the connection pool, applies the schema and starts the retry task.
+     *
+     * <p>If any step fails, the manager is left in a non-ready state,
+     * the error is logged, and the plugin continues to run without
+     * statistics. This allows the rest of the duel system to function
+     * even when MySQL is temporarily unavailable at startup.</p>
      *
      * @return {@code true} if the database is ready to use
      */
@@ -83,14 +100,27 @@ public class DatabaseManager {
     }
 
     /**
-     * Connects without selecting a database and creates it if missing.
+     * Connects to the MySQL server without selecting a database and
+     * creates the target database if it does not exist yet.
+     *
+     * <p>The connection is opened with a plain {@link DriverManager}
+     * call rather than through the pool, because the pool URL requires
+     * the database to already exist.</p>
+     *
+     * @param host MySQL host
+     * @param port MySQL port
+     * @param db   database name to create if missing
+     * @param user MySQL username
+     * @param pass MySQL password
+     * @param ssl  whether to require SSL
+     * @throws SQLException if the connection or the CREATE statement fails
      */
     private void createDatabaseIfMissing(String host, int port, String db,
                                          String user, String pass, boolean ssl)
             throws SQLException {
         String url = "jdbc:mysql://" + host + ":" + port + "/?useSSL=" + ssl
                 + "&allowPublicKeyRetrieval=true&serverTimezone=UTC";
-        try (Connection conn = java.sql.DriverManager.getConnection(url, user, pass);
+        try (Connection conn = DriverManager.getConnection(url, user, pass);
              Statement st = conn.createStatement()) {
             st.executeUpdate("CREATE DATABASE IF NOT EXISTS `" + db
                     + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
@@ -99,6 +129,20 @@ public class DatabaseManager {
 
     /**
      * Opens the HikariCP pool against the target database.
+     *
+     * <p>The timeouts are chosen to be tolerant of slow first responses
+     * from a local MySQL instance. In particular, {@code minimumIdle}
+     * and {@code keepaliveTime} are intentionally left at their defaults,
+     * because forcing eagerly-created idle connections can cause the
+     * pool to fail initialization on slower machines.</p>
+     *
+     * @param host     MySQL host
+     * @param port     MySQL port
+     * @param db       database name
+     * @param user     MySQL username
+     * @param pass     MySQL password
+     * @param poolSize maximum pool size
+     * @param ssl      whether to require SSL
      */
     private void openPool(String host, int port, String db,
                           String user, String pass, int poolSize, boolean ssl) {
@@ -109,6 +153,10 @@ public class DatabaseManager {
         cfg.setPassword(pass);
         cfg.setMaximumPoolSize(poolSize);
         cfg.setPoolName("AngryDuels-Pool");
+        cfg.setConnectionTimeout(10000);
+        cfg.setValidationTimeout(5000);
+        cfg.setIdleTimeout(600000);
+        cfg.setMaxLifetime(1800000);
         cfg.addDataSourceProperty("cachePrepStmts", "true");
         cfg.addDataSourceProperty("prepStmtCacheSize", "250");
         cfg.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
@@ -116,7 +164,13 @@ public class DatabaseManager {
     }
 
     /**
-     * Executes the bundled schema.sql file to create missing tables.
+     * Executes the bundled {@code schema.sql} file to create any missing
+     * table.
+     *
+     * <p>The file is split on semicolons and each statement is executed
+     * individually. Statements that fail do not abort the loop, so a
+     * single problem in one table does not prevent the others from being
+     * created.</p>
      */
     private void applySchema() {
         InputStream is = plugin.getResource("schema.sql");
@@ -124,6 +178,7 @@ public class DatabaseManager {
             Log.error("schema.sql not found in resources!");
             return;
         }
+
         String sql;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(is, StandardCharsets.UTF_8))) {
@@ -132,6 +187,7 @@ public class DatabaseManager {
             Log.error(e, "Failed to read schema.sql");
             return;
         }
+
         try (Connection conn = dataSource.getConnection();
              Statement st = conn.createStatement()) {
             for (String statement : sql.split(";")) {
@@ -146,18 +202,25 @@ public class DatabaseManager {
     }
 
     /**
-     * Starts the scheduled task that drains the retry queue.
+     * Starts the repeating task that drains the retry queue.
+     *
+     * <p>The task runs asynchronously every ten seconds. It skips work
+     * when the queue is empty or when {@link #ping()} reports that MySQL
+     * is still unreachable. Operations that fail during the drain are
+     * re-inserted into the queue so that no data is lost.</p>
      */
     private void startRetryTask() {
         plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, () -> {
             if (retryQueue.isEmpty()) return;
-            if (!isConnected()) return;
-            List<Consumer<Connection>> pending = new ArrayList<>(retryQueue);
+            if (!ping()) return;
+
+            List<Consumer<Connection>> snapshot = new ArrayList<>(retryQueue);
             retryQueue.clear();
-            for (Consumer<Connection> op : pending) {
+
+            for (Consumer<Connection> op : snapshot) {
                 try (Connection conn = dataSource.getConnection()) {
                     op.accept(conn);
-                } catch (SQLException e) {
+                } catch (Exception e) {
                     retryQueue.add(op);
                 }
             }
@@ -165,14 +228,21 @@ public class DatabaseManager {
     }
 
     /**
-     * Returns the connection pool, or {@code null} if not ready.
+     * Returns the connection pool.
+     *
+     * @return the pool, or {@code null} if it has not been initialized
      */
     public HikariDataSource getDataSource() {
         return dataSource;
     }
 
     /**
-     * Checks whether the pool is open and reachable.
+     * Checks whether the pool is open.
+     *
+     * <p>This is a flag-only check that does not perform any network
+     * activity. It is safe to call from the main thread.</p>
+     *
+     * @return {@code true} if the pool has been created and is open
      */
     public boolean isConnected() {
         return dataSource != null && !dataSource.isClosed();
@@ -180,13 +250,42 @@ public class DatabaseManager {
 
     /**
      * Checks whether the manager is ready to serve queries.
+     *
+     * <p>This is a cheap flag-only check and is safe to call from the
+     * main thread. It does not verify that the underlying MySQL server
+     * is actually reachable; use {@link #ping()} for that.</p>
+     *
+     * @return {@code true} if the pool has been initialized
      */
     public boolean isReady() {
-        return ready && isConnected();
+        return ready && dataSource != null && !dataSource.isClosed();
+    }
+
+    /**
+     * Verifies that a connection can actually be obtained from the pool.
+     *
+     * <p>This method performs a real round-trip to the database and
+     * must only be invoked from async threads, since it can block for
+     * up to the configured connection timeout.</p>
+     *
+     * @return {@code true} if a valid connection is available
+     */
+    public boolean ping() {
+        if (!isReady()) return false;
+        try (Connection conn = dataSource.getConnection()) {
+            return conn.isValid(2);
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     /**
      * Pushes an operation to the retry queue.
+     *
+     * <p>The operation is executed later by the retry task on an async
+     * thread, with a live connection obtained from the pool. Callers
+     * are responsible for keeping the closure free of any state that
+     * could become stale between the failure and the retry.</p>
      *
      * @param op operation to retry later
      */
@@ -196,6 +295,9 @@ public class DatabaseManager {
 
     /**
      * Closes the connection pool.
+     *
+     * <p>Any pending retry operation is discarded, as the plugin is
+     * shutting down and the queue will not be processed.</p>
      */
     public void shutdown() {
         if (dataSource != null) {
