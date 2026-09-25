@@ -6,6 +6,7 @@ import com.angryguyy.duels.gui.KitSelectionGui;
 import com.angryguyy.duels.gui.LeaderboardGui;
 import com.angryguyy.duels.stats.LeaderboardCategory;
 import com.angryguyy.duels.util.Log;
+import com.angryguyy.duels.gui.KitEditorGui;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
@@ -87,6 +88,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             case "arena" -> handleArena(sender, args);
             case "stats" -> handleStats(sender, args);
             case "top" -> handleTop(sender, args);
+            case "kiteditor" -> handleKitEditor(sender, args);
+            case "kitreset" -> handleKitReset(sender, args);
             default -> handlePlayerTarget(sender, args);
         }
         return true;
@@ -599,7 +602,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
             List<String> options = new ArrayList<>(
-                    List.of("help", "accept", "deny", "forfeit", "stats", "top"));
+                    List.of("help", "accept", "deny", "forfeit", "stats", "top", "kiteditor", "kitreset"));
             if (sender.hasPermission("duels.admin")) {
                 options.add("reload");
                 options.add("arena");
@@ -678,6 +681,20 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
                     .toList();
         }
 
+        if (args.length == 2 && (args[0].equalsIgnoreCase("kiteditor")
+                || args[0].equalsIgnoreCase("kitreset"))) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            List<String> suggestions = new ArrayList<>();
+            for (var kit : plugin.kits().all()) {
+                suggestions.add(kit.getId());
+                suggestions.addAll(kit.getAliases());
+            }
+            return suggestions.stream()
+                    .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(prefix))
+                    .distinct()
+                    .toList();
+        }
+
         return List.of();
     }
 
@@ -692,8 +709,62 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
      */
     private boolean isSubcommand(String arg) {
         return switch (arg.toLowerCase(Locale.ROOT)) {
-            case "help", "reload", "accept", "deny", "forfeit", "arena", "stats", "top" -> true;
+            case "help", "reload", "accept", "deny", "forfeit", "arena",
+                 "stats", "top", "kiteditor", "kitreset" -> true;
             default -> false;
         };
+    }
+
+    /**
+     * Opens the kit editor GUI for the sender.
+     *
+     * <p>The sender must have the permission of the kit being edited.
+     * The starting layout is the player's personal override if it
+     * exists, otherwise the default kit layout.</p>
+     *
+     * @param sender source of the command; must be a player
+     * @param args   full argument array, where {@code args[1]} is the
+     *               kit id or alias
+     */
+    private void handleKitEditor(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(player, "kit.editor-usage");
+            return;
+        }
+        var kit = plugin.kits().resolve(args[1]);
+        if (kit == null) {
+            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
+            return;
+        }
+        if (!player.hasPermission(kit.getPermission())) {
+            plugin.messages().send(player, "kit.no-permission");
+            return;
+        }
+        KitEditorGui.open(plugin, player, kit);
+    }
+
+    /**
+     * Clears the sender's personal layout for a kit.
+     *
+     * @param sender source of the command; must be a player
+     * @param args   full argument array, where {@code args[1]} is the
+     *               kit id or alias
+     */
+    private void handleKitReset(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(player, "kit.editor-reset-usage");
+            return;
+        }
+        var kit = plugin.kits().resolve(args[1]);
+        if (kit == null) {
+            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
+            return;
+        }
+        plugin.playerKits().clearOverride(player.getUniqueId(), kit.getId());
+        plugin.messages().send(player, "kit.editor-reset", Map.of("kit", kit.getId()));
     }
 }

@@ -6,7 +6,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 /**
- * Forwards player disconnections to the duel manager.
+ * Forwards player disconnections to the duel manager and evicts the
+ * cached kit layout.
  *
  * <p>Disconnects can happen in three distinct situations that the
  * manager must resolve: while the player has an outgoing request,
@@ -36,5 +37,6 @@ public class PlayerQuitListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         plugin.duels().handleQuit(event.getPlayer());
+        plugin.playerKits().unloadForPlayer(event.getPlayer().getUniqueId());
     }
 }

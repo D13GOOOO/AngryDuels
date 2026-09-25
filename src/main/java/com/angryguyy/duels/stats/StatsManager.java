@@ -309,20 +309,31 @@ public class StatsManager {
      *
      * <p>Deleting the row in {@code duels_players} cascades to
      * {@code duels_stats} and {@code duels_kit_stats} thanks to the
-     * foreign key constraints, so a single delete is enough. The
-     * historical log is left untouched on purpose, so admins can still
-     * audit past duels.</p>
+     * foreign key constraints. The {@code duels_player_kits} table has
+     * no foreign key (to avoid collation issues between servers), so
+     * its rows are deleted manually here. The historical log is left
+     * untouched on purpose, so admins can still audit past duels.</p>
      *
      * @param uuid player uuid
      */
     public void resetStats(UUID uuid) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             if (!database.isReady()) return;
-            try (Connection conn = database.getDataSource().getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                         "DELETE FROM duels_players WHERE uuid = ?")) {
-                ps.setString(1, uuid.toString());
-                ps.executeUpdate();
+            try (Connection conn = database.getDataSource().getConnection()) {
+                conn.setAutoCommit(false);
+
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM duels_player_kits WHERE uuid = ?")) {
+                    ps.setString(1, uuid.toString());
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM duels_players WHERE uuid = ?")) {
+                    ps.setString(1, uuid.toString());
+                    ps.executeUpdate();
+                }
+
+                conn.commit();
             } catch (SQLException e) {
                 Log.error(e, "Failed to reset stats for %s", uuid);
             }
@@ -334,7 +345,9 @@ public class StatsManager {
      *
      * <p>The historical table is also truncated, so this method is
      * intended for full wipes only. Foreign key checks are temporarily
-     * disabled to allow truncation in any order.</p>
+     * disabled to allow truncation in any order. The
+     * {@code duels_player_kits} table is included even though it has no
+     * foreign key, so a full wipe also clears the player layouts.</p>
      */
     public void resetAll() {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -342,6 +355,7 @@ public class StatsManager {
             try (Connection conn = database.getDataSource().getConnection();
                  Statement st = conn.createStatement()) {
                 st.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
+                st.executeUpdate("TRUNCATE TABLE duels_player_kits");
                 st.executeUpdate("TRUNCATE TABLE duels_kit_stats");
                 st.executeUpdate("TRUNCATE TABLE duels_history");
                 st.executeUpdate("TRUNCATE TABLE duels_stats");

@@ -176,8 +176,10 @@ public class DatabaseManager {
      * table.
      *
      * <p>The file is split on semicolons and each statement is executed
-     * individually. Statements that fail do not abort the loop, so a
-     * single problem in one table does not prevent the others from being
+     * individually. Line comments ({@code --}) are stripped before
+     * splitting, so a comment containing a semicolon does not break the
+     * parser. Statements that fail do not abort the loop, so a single
+     * problem in one table does not prevent the others from being
      * created.</p>
      */
     private void applySchema() {
@@ -187,14 +189,16 @@ public class DatabaseManager {
             return;
         }
 
-        String sql;
+        String rawSql;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            sql = reader.lines().collect(Collectors.joining("\n"));
+            rawSql = reader.lines().collect(Collectors.joining("\n"));
         } catch (Exception e) {
             Log.error(e, "Failed to read schema.sql");
             return;
         }
+
+        String sql = stripLineComments(rawSql);
 
         try (Connection conn = dataSource.getConnection();
              Statement st = conn.createStatement()) {
@@ -207,6 +211,26 @@ public class DatabaseManager {
         } catch (SQLException e) {
             Log.error(e, "Failed to apply schema.sql");
         }
+    }
+
+    /**
+     * Removes SQL line comments from a script.
+     *
+     * <p>A line is considered a comment when its first non-whitespace
+     * characters are {@code --}. Block comments are not supported, since
+     * the bundled schema does not use them.</p>
+     *
+     * @param sql raw SQL script
+     * @return the script without line comments
+     */
+    private String stripLineComments(String sql) {
+        StringBuilder out = new StringBuilder();
+        for (String line : sql.split("\n", -1)) {
+            String trimmed = line.stripLeading();
+            if (trimmed.startsWith("--")) continue;
+            out.append(line).append('\n');
+        }
+        return out.toString();
     }
 
     /**

@@ -384,17 +384,23 @@ public class DuelManager {
         target.setGameMode(GameMode.SURVIVAL);
         sender.setFireTicks(0);
         target.setFireTicks(0);
+        sender.clearActivePotionEffects();
+        target.clearActivePotionEffects();
 
         sessions.put(sender.getUniqueId(), session);
         sessions.put(target.getUniqueId(), session);
 
         if (session.getKitId() != null) {
-            var kit = plugin.kits().get(session.getKitId());
-            if (kit != null) {
-                kit.apply(sender);
-                kit.apply(target);
+            var baseKit = plugin.kits().get(session.getKitId());
+            if (baseKit != null) {
+                var senderKit = plugin.playerKits()
+                        .resolveForPlayer(sender.getUniqueId(), baseKit);
+                var targetKit = plugin.playerKits()
+                        .resolveForPlayer(target.getUniqueId(), baseKit);
+                senderKit.apply(sender);
+                targetKit.apply(target);
                 Log.debug("Applied kit '%s' to %s and %s",
-                        kit.getId(), sender.getName(), target.getName());
+                        baseKit.getId(), sender.getName(), target.getName());
             }
         }
 
@@ -619,7 +625,11 @@ public class DuelManager {
             Player a = Bukkit.getPlayer(session.getPlayerA());
             Player b = Bukkit.getPlayer(session.getPlayerB());
 
-            if (reason != DuelEndReason.PLAYER_DIED) {
+            if (reason == DuelEndReason.PLAYER_DIED) {
+                if (winner != null && plugin.snapshots().hasPending(winner.getUniqueId())) {
+                    plugin.snapshots().scheduleRestore(winner, 4L);
+                }
+            } else {
                 if (a != null && plugin.snapshots().hasPending(a.getUniqueId())) {
                     plugin.snapshots().scheduleRestore(a, 4L);
                 }

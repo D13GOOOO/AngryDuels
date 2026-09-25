@@ -6,10 +6,12 @@ import com.angryguyy.duels.config.ConfigManager;
 import com.angryguyy.duels.config.MessagesManager;
 import com.angryguyy.duels.duel.DuelManager;
 import com.angryguyy.duels.kit.KitManager;
+import com.angryguyy.duels.kit.PlayerKitManager;
 import com.angryguyy.duels.listener.DuelIsolationListener;
 import com.angryguyy.duels.listener.DuelProtectionListener;
 import com.angryguyy.duels.listener.DuelRewardListener;
 import com.angryguyy.duels.listener.DuelStatsListener;
+import com.angryguyy.duels.listener.KitEditorListener;
 import com.angryguyy.duels.listener.KitGuiListener;
 import com.angryguyy.duels.listener.LeaderboardGuiListener;
 import com.angryguyy.duels.listener.PlayerDeathListener;
@@ -23,6 +25,8 @@ import com.angryguyy.duels.stats.LeaderboardManager;
 import com.angryguyy.duels.stats.StatsManager;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.world.DuelWorldManager;
+import org.bukkit.configuration.serialization.ConfigurationSerialization;
+import com.angryguyy.duels.snapshot.PlayerSnapshot;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -46,6 +50,7 @@ public final class DuelsPlugin extends JavaPlugin {
     private ArenaManager arenaManager;
     private SnapshotManager snapshotManager;
     private KitManager kitManager;
+    private PlayerKitManager playerKitManager;
     private RewardManager rewardManager;
     private DatabaseManager databaseManager;
     private StatsManager statsManager;
@@ -56,12 +61,17 @@ public final class DuelsPlugin extends JavaPlugin {
      *
      * <p>Instantiates all managers in dependency order, loads persisted
      * snapshots and kits, registers commands and listeners, and logs a
-     * startup banner.</p>
+     * startup banner. Managers that depend on the database pool are
+     * initialized only after {@link DatabaseManager#init()} has run, so
+     * they can safely capture a reference to the pool even when the
+     * database is currently offline.</p>
      */
     @Override
     public void onEnable() {
         instance = this;
         Log.info("AngryDuels v%s loading subsystems...", getPluginMeta().getVersion());
+
+        ConfigurationSerialization.registerClass(PlayerSnapshot.class);
 
         this.configManager = new ConfigManager(this);
         this.messagesManager = new MessagesManager(this);
@@ -73,11 +83,14 @@ public final class DuelsPlugin extends JavaPlugin {
         kitManager.load();
         this.rewardManager = new RewardManager(this);
         rewardManager.load();
+
         this.databaseManager = new DatabaseManager(this);
         this.statsManager = new StatsManager(this, databaseManager);
         databaseManager.init();
         this.leaderboardManager = new LeaderboardManager(this, databaseManager);
         leaderboardManager.start();
+        this.playerKitManager = new PlayerKitManager(this, databaseManager);
+
         this.snapshotManager = new SnapshotManager(this);
         snapshotManager.loadAll();
 
@@ -101,10 +114,15 @@ public final class DuelsPlugin extends JavaPlugin {
 
     /**
      * Called by the server when the plugin is disabled.
+     *
+     * <p>Shuts down the managers that hold external resources: the
+     * leaderboard refresh task, the database pool, the player kit
+     * cache, and any active duel session.</p>
      */
     @Override
     public void onDisable() {
         if (leaderboardManager != null) leaderboardManager.shutdown();
+        if (playerKitManager != null) playerKitManager.shutdown();
         if (databaseManager != null) databaseManager.shutdown();
         if (duelManager != null) duelManager.shutdown();
         instance = null;
@@ -135,6 +153,7 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DuelProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelIsolationListener(this), this);
         getServer().getPluginManager().registerEvents(new KitGuiListener(this), this);
+        getServer().getPluginManager().registerEvents(new KitEditorListener(this), this);
         getServer().getPluginManager().registerEvents(new LeaderboardGuiListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelRewardListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelStatsListener(this), this);
@@ -148,6 +167,7 @@ public final class DuelsPlugin extends JavaPlugin {
     public ArenaManager arenas() { return arenaManager; }
     public SnapshotManager snapshots() { return snapshotManager; }
     public KitManager kits() { return kitManager; }
+    public PlayerKitManager playerKits() { return playerKitManager; }
     public RewardManager rewards() { return rewardManager; }
     public StatsManager stats() { return statsManager; }
     public DatabaseManager database() { return databaseManager; }

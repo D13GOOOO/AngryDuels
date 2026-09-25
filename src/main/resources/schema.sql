@@ -1,6 +1,6 @@
 -- ================================================================
 --  AngryDuels - database schema
---  Executed on startup; every statement uses IF NOT EXISTS so the
+--  Executed on startup. Every statement uses IF NOT EXISTS so the
 --  script is idempotent and safe to run against an existing database.
 -- ================================================================
 
@@ -51,4 +51,13 @@ CREATE TABLE IF NOT EXISTS duels_history (
     INDEX idx_winner (winner_uuid),
     INDEX idx_loser (loser_uuid),
     INDEX idx_ended_at (ended_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS duels_player_kits (
+    uuid       CHAR(36)    NOT NULL COMMENT 'Player UUID',
+    kit_id     VARCHAR(32) NOT NULL COMMENT 'Kit identifier',
+    slot       INT         NOT NULL COMMENT 'Inventory slot index',
+    item_data  BLOB        NOT NULL COMMENT 'ItemStack serialized as bytes',
+    updated_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (uuid, kit_id, slot)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

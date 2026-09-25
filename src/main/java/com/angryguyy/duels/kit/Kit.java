@@ -192,4 +192,19 @@ public class Kit {
         }
         player.updateInventory();
     }
+
+    /**
+     * Returns a copy of this kit with a different item layout.
+     *
+     * <p>The returned kit keeps the same id, display name, permission
+     * and aliases as the original, but uses the given layout for its
+     * items. This is used to apply a per-player override without
+     * mutating the shared kit instance.</p>
+     *
+     * @param layout new slot-to-item mapping
+     * @return a new kit with the given layout
+     */
+    public Kit withLayout(Map<Integer, ItemStack> layout) {
+        return new Kit(id, displayName, permission, aliases, layout, icon);
+    }
 }

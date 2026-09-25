@@ -14,6 +14,8 @@ general:
     - "<gray>/duel forfeit <dark_gray>- <white>forfeit your active duel"
     - "<gray>/duel stats [player] <dark_gray>- <white>show duel statistics"
     - "<gray>/duel top <category> [page|gui] <dark_gray>- <white>show the leaderboard"
+    - "<gray>/duel kiteditor <kit> <dark_gray>- <white>rearrange a kit to your liking"
+    - "<gray>/duel kitreset <kit> <dark_gray>- <white>reset your layout to default"
 
 duel:
   self: "<red>You can't duel yourself."
@@ -60,6 +62,12 @@ kit:
   not-found: "<red>Kit <white><kit></white> not found."
   no-permission: "<red>You don't have permission to use this kit."
   no-kits-available: "<red>You don't have permission to use any kit."
+  editor-usage: "<gray>Usage: <white>/duel kiteditor <kit></white>"
+  editor-saved: "<green>Your <white><kit></white> layout has been saved."
+  editor-reset-usage: "<gray>Usage: <white>/duel kitreset <kit></white>"
+  editor-reset: "<green>Your <white><kit></white> layout has been reset to default."
+  editor-cursor: "<red>Drop the item you're holding before clicking."
+  editor-save-error: "<red>Could not save your layout right now. Please try again later."
 
 stats:
   not-found: "<red>No stats found for <white><player></white>."

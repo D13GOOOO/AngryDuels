@@ -6,12 +6,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 
 /**
- * Recovers pending snapshots when a player reconnects.
+ * Recovers pending snapshots when a player reconnects and warms up the
+ * per-player kit layout cache.
  *
- * <p>If the server was shut down or crashed while the player was inside
- * a duel, a snapshot for that player is still persisted on disk. This
- * listener detects the situation on join and applies the snapshot a few
- * ticks later, once the player has fully spawned.</p>
+ * <p>The snapshot recovery handles the crash-during-duel case. The kit
+ * layout load populates the cache used by {@code PlayerKitManager} so
+ * that the first duel after join does not need to wait for a database
+ * round trip.</p>
  */
 public class PlayerJoinListener implements Listener {
 
@@ -27,12 +28,14 @@ public class PlayerJoinListener implements Listener {
     }
 
     /**
-     * Applies a pending snapshot to the joining player, if any.
+     * Schedules a snapshot restore and a layout cache load.
      *
      * @param event the join event
      */
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
+        plugin.playerKits().loadForPlayer(event.getPlayer().getUniqueId());
+
         if (!plugin.snapshots().hasPending(event.getPlayer().getUniqueId())) return;
         plugin.snapshots().scheduleRestore(event.getPlayer(), 10L);
     }

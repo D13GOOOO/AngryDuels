@@ -12,6 +12,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.configuration.serialization.SerializableAs;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,6 +46,7 @@ import java.util.UUID;
  * The serialized form is stable across plugin versions and is used by
  * the {@link SnapshotManager} for crash recovery.</p>
  */
+@SerializableAs("PlayerSnapshot")
 public final class PlayerSnapshot implements ConfigurationSerializable {
 
     private final UUID uuid;
