@@ -13,6 +13,10 @@ commands:
     description: Main duels command
     usage: /duels <subcommand>
     aliases: [ duel, d ]
+  party:
+    description: Party management command
+    usage: /party <subcommand>
+    aliases: [ p ]
 
 permissions:
   duels.use:

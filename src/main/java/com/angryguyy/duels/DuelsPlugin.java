@@ -2,6 +2,7 @@ package com.angryguyy.duels;
 
 import com.angryguyy.duels.arena.ArenaManager;
 import com.angryguyy.duels.command.DuelsCommand;
+import com.angryguyy.duels.command.PartyCommand;
 import com.angryguyy.duels.config.ConfigManager;
 import com.angryguyy.duels.config.MessagesManager;
 import com.angryguyy.duels.duel.DuelManager;
@@ -14,20 +15,25 @@ import com.angryguyy.duels.listener.DuelStatsListener;
 import com.angryguyy.duels.listener.KitEditorListener;
 import com.angryguyy.duels.listener.KitGuiListener;
 import com.angryguyy.duels.listener.LeaderboardGuiListener;
+import com.angryguyy.duels.listener.PartyGuiListener;
+import com.angryguyy.duels.listener.PartyItemListener;
 import com.angryguyy.duels.listener.PlayerDeathListener;
 import com.angryguyy.duels.listener.PlayerJoinListener;
 import com.angryguyy.duels.listener.PlayerQuitListener;
 import com.angryguyy.duels.listener.PlayerRespawnListener;
+import com.angryguyy.duels.party.PartyManager;
+import com.angryguyy.duels.party.item.PartyItemManager;
+import com.angryguyy.duels.party.match.PartyMatchSetupManager;
 import com.angryguyy.duels.reward.RewardManager;
+import com.angryguyy.duels.snapshot.PlayerSnapshot;
 import com.angryguyy.duels.snapshot.SnapshotManager;
 import com.angryguyy.duels.stats.DatabaseManager;
 import com.angryguyy.duels.stats.LeaderboardManager;
 import com.angryguyy.duels.stats.StatsManager;
 import com.angryguyy.duels.util.Log;
 import com.angryguyy.duels.world.DuelWorldManager;
-import org.bukkit.configuration.serialization.ConfigurationSerialization;
-import com.angryguyy.duels.snapshot.PlayerSnapshot;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.configuration.serialization.ConfigurationSerialization;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -55,6 +61,9 @@ public final class DuelsPlugin extends JavaPlugin {
     private DatabaseManager databaseManager;
     private StatsManager statsManager;
     private LeaderboardManager leaderboardManager;
+    private PartyManager partyManager;
+    private PartyItemManager partyItemManager;
+    private PartyMatchSetupManager partyMatchSetupManager;
 
     /**
      * Called by the server when the plugin is enabled.
@@ -65,6 +74,11 @@ public final class DuelsPlugin extends JavaPlugin {
      * initialized only after {@link DatabaseManager#init()} has run, so
      * they can safely capture a reference to the pool even when the
      * database is currently offline.</p>
+     *
+     * <p>The {@link PlayerSnapshot} class is registered with the
+     * configuration serialization system before any snapshot is loaded,
+     * so that pending snapshots on disk can be deserialized correctly
+     * at startup.</p>
      */
     @Override
     public void onEnable() {
@@ -90,6 +104,10 @@ public final class DuelsPlugin extends JavaPlugin {
         this.leaderboardManager = new LeaderboardManager(this, databaseManager);
         leaderboardManager.start();
         this.playerKitManager = new PlayerKitManager(this, databaseManager);
+        this.partyManager = new PartyManager(this, databaseManager);
+        partyManager.load();
+        this.partyItemManager = new PartyItemManager(partyManager);
+        this.partyMatchSetupManager = new PartyMatchSetupManager();
 
         this.snapshotManager = new SnapshotManager(this);
         snapshotManager.loadAll();
@@ -115,13 +133,18 @@ public final class DuelsPlugin extends JavaPlugin {
     /**
      * Called by the server when the plugin is disabled.
      *
-     * <p>Shuts down the managers that hold external resources: the
-     * leaderboard refresh task, the database pool, the player kit
-     * cache, and any active duel session.</p>
+     * <p>Shuts down the managers that hold external resources in
+     * reverse initialization order: the leaderboard refresh task, the
+     * party and player kit caches, the database pool, and any active
+     * duel session. The order matters because the database pool must be
+     * closed only after every consumer has stopped using it.</p>
      */
     @Override
     public void onDisable() {
         if (leaderboardManager != null) leaderboardManager.shutdown();
+        if (partyMatchSetupManager != null) partyMatchSetupManager.shutdown();
+        if (partyItemManager != null) partyItemManager.shutdown();
+        if (partyManager != null) partyManager.shutdown();
         if (playerKitManager != null) playerKitManager.shutdown();
         if (databaseManager != null) databaseManager.shutdown();
         if (duelManager != null) duelManager.shutdown();
@@ -129,17 +152,26 @@ public final class DuelsPlugin extends JavaPlugin {
     }
 
     /**
-     * Registers the {@code /duels} command and its tab completer.
+     * Registers the plugin commands and their tab completers.
      */
     private void registerCommands() {
         DuelsCommand cmd = new DuelsCommand(this);
         PluginCommand pluginCommand = getCommand("duels");
         if (pluginCommand == null) {
             Log.error("Command 'duels' is not defined in plugin.yml!");
-            return;
+        } else {
+            pluginCommand.setExecutor(cmd);
+            pluginCommand.setTabCompleter(cmd);
         }
-        pluginCommand.setExecutor(cmd);
-        pluginCommand.setTabCompleter(cmd);
+
+        PartyCommand partyCmd = new PartyCommand(this);
+        PluginCommand partyCommand = getCommand("party");
+        if (partyCommand == null) {
+            Log.error("Command 'party' is not defined in plugin.yml!");
+        } else {
+            partyCommand.setExecutor(partyCmd);
+            partyCommand.setTabCompleter(partyCmd);
+        }
     }
 
     /**
@@ -157,6 +189,8 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new LeaderboardGuiListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelRewardListener(this), this);
         getServer().getPluginManager().registerEvents(new DuelStatsListener(this), this);
+        getServer().getPluginManager().registerEvents(new PartyItemListener(this), this);
+        getServer().getPluginManager().registerEvents(new PartyGuiListener(this), this);
     }
 
     public static DuelsPlugin getInstance() { return instance; }
@@ -172,4 +206,7 @@ public final class DuelsPlugin extends JavaPlugin {
     public StatsManager stats() { return statsManager; }
     public DatabaseManager database() { return databaseManager; }
     public LeaderboardManager leaderboards() { return leaderboardManager; }
+    public PartyManager parties() { return partyManager; }
+    public PartyItemManager partyItems() { return partyItemManager; }
+    public PartyMatchSetupManager partyMatchSetups() { return partyMatchSetupManager; }
 }

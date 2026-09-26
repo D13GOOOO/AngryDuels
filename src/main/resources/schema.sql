@@ -61,3 +61,32 @@ CREATE TABLE IF NOT EXISTS duels_player_kits (
     updated_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (uuid, kit_id, slot)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS duels_parties (
+    id          BIGINT      NOT NULL AUTO_INCREMENT,
+    leader_uuid CHAR(36)    NOT NULL COMMENT 'Party leader UUID',
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_leader (leader_uuid)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS duels_party_members (
+    party_id  BIGINT   NOT NULL,
+    uuid      CHAR(36) NOT NULL,
+    joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (party_id, uuid),
+    INDEX idx_uuid (uuid),
+    CONSTRAINT fk_party_members_party FOREIGN KEY (party_id)
+    REFERENCES duels_parties (id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS duels_party_invites (
+    party_id   BIGINT   NOT NULL,
+    inviter    CHAR(36) NOT NULL,
+    invitee    CHAR(36) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (party_id, invitee),
+    INDEX idx_invitee (invitee),
+    CONSTRAINT fk_party_invites_party FOREIGN KEY (party_id)
+    REFERENCES duels_parties (id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
