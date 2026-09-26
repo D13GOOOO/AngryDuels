@@ -5,76 +5,200 @@ import org.bukkit.Location;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
  * Mutable runtime state of an active duel.
  *
- * <p>An instance is created when a request is accepted and lives until
- * the duel ends. It binds together the two duelists, the optional kit
- * identifier, the assigned {@link Arena}, the positions each player
- * will be returned to, and the current {@link DuelPhase}.</p>
+ * <p>Three modes are supported:</p>
+ * <ul>
+ *     <li><b>1v1</b>: each team contains a single player.</li>
+ *     <li><b>Team</b>: each team contains several players, typically
+ *     every member of a party.</li>
+ *     <li><b>FFA</b>: every player is their own team. The match ends
+ *     when a single player is left alive.</li>
+ * </ul>
  *
- * <p>All fields except the phase are immutable. The phase is mutated
- * exactly once by the {@link DuelManager} when the countdown completes,
- * transitioning the session from {@link DuelPhase#COUNTDOWN} to
- * {@link DuelPhase#ACTIVE}.</p>
+ * <p>In 1v1 and team modes, {@link #teamOf(UUID)} returns 1 or 2. In
+ * FFA mode it returns a unique one-based index identifying the player
+ * inside {@link #getFfaPlayers()}. This keeps the calling code uniform:
+ * two players on the same team share the same index, while in FFA every
+ * player has a distinct one.</p>
+ *
+ * <p>Every mutable field except the phase is fixed at construction. The
+ * phase is advanced exactly once by the {@link DuelManager} when the
+ * countdown completes.</p>
  *
  * <p>The class is not thread-safe; access is expected on the main
  * thread only.</p>
  */
 public final class DuelSession {
 
-    private final UUID playerA;
-    private final UUID playerB;
+    private final List<UUID> teamA;
+    private final List<UUID> teamB;
+    private final boolean ffaMode;
+    private final List<UUID> ffaPlayers;
     private final @Nullable String kitId;
     private final @Nullable Arena arena;
-    private final @Nullable Location returnA;
-    private final @Nullable Location returnB;
+    private final Map<UUID, Location> returnLocations;
     private final Instant startedAt;
     private DuelPhase phase = DuelPhase.COUNTDOWN;
 
     /**
-     * Creates a new session.
+     * Creates a 1v1 or team session.
      *
-     * @param playerA  uuid of the first duelist (the request sender)
-     * @param playerB  uuid of the second duelist (the request target)
-     * @param kitId    optional kit identifier, or {@code null}
-     * @param arena    assigned arena, or {@code null} if none was
-     *                 available
-     * @param returnA  position to teleport the first duelist back to,
-     *                 or {@code null}
-     * @param returnB  position to teleport the second duelist back to,
-     *                 or {@code null}
+     * @param teamA           uuids of the first team; must not be empty
+     * @param teamB           uuids of the second team; must not be empty
+     * @param kitId           optional kit identifier, or {@code null}
+     * @param arena           assigned arena, or {@code null}
+     * @param returnLocations map of return location per player
      */
-    public DuelSession(UUID playerA, UUID playerB, @Nullable String kitId,
+    public DuelSession(List<UUID> teamA, List<UUID> teamB,
+                       @Nullable String kitId,
                        @Nullable Arena arena,
-                       @Nullable Location returnA, @Nullable Location returnB) {
-        this.playerA = playerA;
-        this.playerB = playerB;
+                       Map<UUID, Location> returnLocations) {
+        this.teamA = List.copyOf(teamA);
+        this.teamB = List.copyOf(teamB);
+        this.ffaMode = false;
+        this.ffaPlayers = List.of();
         this.kitId = kitId;
         this.arena = arena;
-        this.returnA = returnA;
-        this.returnB = returnB;
+        this.returnLocations = Map.copyOf(returnLocations);
         this.startedAt = Instant.now();
     }
 
     /**
-     * Returns the uuid of the first duelist.
+     * Creates a free-for-all session.
      *
-     * @return first duelist uuid
+     * <p>Every player is their own team. Internally the players are
+     * stored as {@code teamA} so that generic iteration keeps working;
+     * the {@code ffaPlayers} list preserves their individual identity
+     * for the {@link #teamOf(UUID)} lookup.</p>
+     *
+     * @param players         every participant; must contain at least two
+     * @param kitId           optional kit identifier, or {@code null}
+     * @param arena           assigned arena, or {@code null}
+     * @param returnLocations map of return location per player
      */
-    public UUID getPlayerA() {
-        return playerA;
+    public DuelSession(List<UUID> players,
+                       @Nullable String kitId,
+                       @Nullable Arena arena,
+                       Map<UUID, Location> returnLocations) {
+        this.teamA = List.copyOf(players);
+        this.teamB = List.of();
+        this.ffaMode = true;
+        this.ffaPlayers = List.copyOf(players);
+        this.kitId = kitId;
+        this.arena = arena;
+        this.returnLocations = Map.copyOf(returnLocations);
+        this.startedAt = Instant.now();
     }
 
     /**
-     * Returns the uuid of the second duelist.
+     * Convenience constructor for a classic 1v1.
      *
-     * @return second duelist uuid
+     * @param playerA         uuid of the first duelist
+     * @param playerB         uuid of the second duelist
+     * @param kitId           optional kit identifier, or {@code null}
+     * @param arena           assigned arena, or {@code null}
+     * @param returnA         return location for player A, or {@code null}
+     * @param returnB         return location for player B, or {@code null}
      */
-    public UUID getPlayerB() {
-        return playerB;
+    public DuelSession(UUID playerA, UUID playerB, @Nullable String kitId,
+                       @Nullable Arena arena,
+                       @Nullable Location returnA, @Nullable Location returnB) {
+        this(List.of(playerA), List.of(playerB), kitId, arena,
+                buildReturnMap(playerA, returnA, playerB, returnB));
+    }
+
+    /**
+     * Builds a return-locations map from two optional entries, skipping
+     * any pair whose location is {@code null}.
+     *
+     * @param a  uuid of the first player
+     * @param la return location for player A, or {@code null}
+     * @param b  uuid of the second player
+     * @param lb return location for player B, or {@code null}
+     * @return map of return locations, possibly empty
+     */
+    private static Map<UUID, Location> buildReturnMap(UUID a, @Nullable Location la,
+                                                      UUID b, @Nullable Location lb) {
+        Map<UUID, Location> map = new HashMap<>();
+        if (la != null) map.put(a, la);
+        if (lb != null) map.put(b, lb);
+        return map;
+    }
+
+    /**
+     * Returns an unmodifiable view of the first team.
+     *
+     * @return team A
+     */
+    public List<UUID> getTeamA() {
+        return teamA;
+    }
+
+    /**
+     * Returns an unmodifiable view of the second team.
+     *
+     * @return team B
+     */
+    public List<UUID> getTeamB() {
+        return teamB;
+    }
+
+    /**
+     * Returns whether the session is a free-for-all.
+     *
+     * @return {@code true} for FFA
+     */
+    public boolean isFfaMode() {
+        return ffaMode;
+    }
+
+    /**
+     * Returns the FFA player list, in the order they were assigned.
+     *
+     * @return list of players, empty for non-FFA sessions
+     */
+    public List<UUID> getFfaPlayers() {
+        return ffaPlayers;
+    }
+
+    /**
+     * Returns every player taking part in the duel.
+     *
+     * @return team A followed by team B, or every FFA player
+     */
+    public List<UUID> getAllPlayers() {
+        List<UUID> out = new ArrayList<>(teamA.size() + teamB.size());
+        out.addAll(teamA);
+        out.addAll(teamB);
+        return Collections.unmodifiableList(out);
+    }
+
+    /**
+     * Returns the first element of team A, used as representative.
+     *
+     * @return team A representative uuid
+     */
+    public UUID getLeaderA() {
+        return teamA.get(0);
+    }
+
+    /**
+     * Returns the representative of team B, if any.
+     *
+     * @return team B leader uuid, or {@code null} for FFA
+     */
+    public @Nullable UUID getLeaderB() {
+        return teamB.isEmpty() ? null : teamB.get(0);
     }
 
     /**
@@ -96,21 +220,22 @@ public final class DuelSession {
     }
 
     /**
-     * Returns the location the first duelist will be returned to.
+     * Returns the return location registered for a player, if any.
      *
-     * @return return location for player A, or {@code null}
+     * @param uuid player uuid
+     * @return location, or {@code null}
      */
-    public @Nullable Location getReturnA() {
-        return returnA;
+    public @Nullable Location getReturnLocation(UUID uuid) {
+        return returnLocations.get(uuid);
     }
 
     /**
-     * Returns the location the second duelist will be returned to.
+     * Returns the full return-locations map.
      *
-     * @return return location for player B, or {@code null}
+     * @return unmodifiable map of return locations
      */
-    public @Nullable Location getReturnB() {
-        return returnB;
+    public Map<UUID, Location> getReturnLocations() {
+        return returnLocations;
     }
 
     /**
@@ -134,9 +259,6 @@ public final class DuelSession {
     /**
      * Updates the phase of the duel.
      *
-     * <p>This method is intended to be called only by the
-     * {@link DuelManager} when the countdown completes.</p>
-     *
      * @param phase new phase
      */
     public void setPhase(DuelPhase phase) {
@@ -144,25 +266,90 @@ public final class DuelSession {
     }
 
     /**
-     * Checks whether the given player is one of the two duelists.
+     * Checks whether the given player is part of this session.
      *
      * @param uuid uuid to test
-     * @return {@code true} if the uuid matches player A or player B
+     * @return {@code true} if the uuid belongs to either team
      */
     public boolean contains(UUID uuid) {
-        return playerA.equals(uuid) || playerB.equals(uuid);
+        return teamA.contains(uuid) || teamB.contains(uuid);
     }
 
     /**
-     * Returns the opponent of the given player.
+     * Returns the team index of a player.
      *
-     * @param uuid uuid of one of the two duelists
-     * @return uuid of the other duelist, or {@code null} if the given
-     *         uuid does not belong to this session
+     * @param uuid player uuid
+     * @return 1 or 2 for non-FFA, a unique 1-based index for FFA,
+     *         {@code 0} if the player is not part of the session
      */
-    public @Nullable UUID opponentOf(UUID uuid) {
-        if (playerA.equals(uuid)) return playerB;
-        if (playerB.equals(uuid)) return playerA;
-        return null;
+    public int teamOf(UUID uuid) {
+        if (ffaMode) {
+            int idx = ffaPlayers.indexOf(uuid);
+            return idx < 0 ? 0 : idx + 1;
+        }
+        if (teamA.contains(uuid)) return 1;
+        if (teamB.contains(uuid)) return 2;
+        return 0;
+    }
+
+    /**
+     * Returns the teammates of a player, including the player itself.
+     *
+     * @param uuid player uuid
+     * @return list of teammates, or an empty list
+     */
+    public List<UUID> teammatesOf(UUID uuid) {
+        if (ffaMode) {
+            return ffaPlayers.contains(uuid) ? List.of(uuid) : List.of();
+        }
+        if (teamA.contains(uuid)) return teamA;
+        if (teamB.contains(uuid)) return teamB;
+        return List.of();
+    }
+
+    /**
+     * Returns the opponents of a player.
+     *
+     * @param uuid player uuid
+     * @return list of opponents, or an empty list
+     */
+    public List<UUID> opponentsOf(UUID uuid) {
+        if (ffaMode) {
+            if (!ffaPlayers.contains(uuid)) return List.of();
+            List<UUID> out = new ArrayList<>();
+            for (UUID other : ffaPlayers) {
+                if (!other.equals(uuid)) out.add(other);
+            }
+            return out;
+        }
+        if (teamA.contains(uuid)) return teamB;
+        if (teamB.contains(uuid)) return teamA;
+        return List.of();
+    }
+
+    /**
+     * Returns the winners of the match given the set of alive players.
+     *
+     * <p>In 1v1 and team modes, a team wins when the opposing team has
+     * no alive members. In FFA mode, a player wins when they are the
+     * only one left alive. Returns an empty list if the match should
+     * continue.</p>
+     *
+     * @param alive set of uuids currently alive
+     * @return list of winning player uuids, or an empty list
+     */
+    public List<UUID> winnersIfEnded(Set<UUID> alive) {
+        if (ffaMode) {
+            List<UUID> surviving = new ArrayList<>();
+            for (UUID uuid : ffaPlayers) {
+                if (alive.contains(uuid)) surviving.add(uuid);
+            }
+            return surviving.size() == 1 ? surviving : List.of();
+        }
+        boolean aAlive = teamA.stream().anyMatch(alive::contains);
+        boolean bAlive = teamB.stream().anyMatch(alive::contains);
+        if (aAlive && !bAlive) return teamA;
+        if (bAlive && !aAlive) return teamB;
+        return List.of();
     }
 }

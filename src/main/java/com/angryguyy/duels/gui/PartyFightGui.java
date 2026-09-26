@@ -2,7 +2,6 @@ package com.angryguyy.duels.gui;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.party.Party;
-import com.angryguyy.duels.party.match.PartyMatchType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -13,6 +12,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -24,10 +24,24 @@ import java.util.List;
  */
 public final class PartyFightGui {
 
+    /**
+     * Total number of slots of the inventory.
+     */
     private static final int SIZE = 27;
+
+    /**
+     * Slot of the FFA button.
+     */
     private static final int FFA_SLOT = 11;
+
+    /**
+     * Slot of the Split button.
+     */
     private static final int SPLIT_SLOT = 15;
 
+    /**
+     * Prevents instantiation.
+     */
     private PartyFightGui() {
     }
 
@@ -82,6 +96,11 @@ public final class PartyFightGui {
         return SPLIT_SLOT;
     }
 
+    /**
+     * Fills the outer ring of the inventory with black glass panes.
+     *
+     * @param inv inventory to decorate
+     */
     private static void fillBorder(Inventory inv) {
         ItemStack border = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta meta = border.getItemMeta();
@@ -96,13 +115,21 @@ public final class PartyFightGui {
         }
     }
 
+    /**
+     * Builds a labelled button with the given lore lines.
+     *
+     * @param material  button material
+     * @param title     MiniMessage title
+     * @param loreLines MiniMessage lore lines
+     * @return the built button
+     */
     private static ItemStack buildButton(Material material, String title, String... loreLines) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) return stack;
         MiniMessage mm = MiniMessage.miniMessage();
         meta.displayName(mm.deserialize(title).decoration(TextDecoration.ITALIC, false));
-        List<Component> lore = new java.util.ArrayList<>();
+        List<Component> lore = new ArrayList<>();
         for (String line : loreLines) {
             lore.add(mm.deserialize(line).decoration(TextDecoration.ITALIC, false));
         }

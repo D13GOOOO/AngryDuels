@@ -39,6 +39,9 @@ import java.util.Map;
  */
 public class KitEditorListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

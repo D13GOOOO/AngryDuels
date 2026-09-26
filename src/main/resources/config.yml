@@ -29,7 +29,7 @@ storage:
 
 # ================================================================
 #  Arenas
-#  Managed in-game with /duel arena <list|create|setspawn|delete|reload>
+#  Managed in-game with /duel arena <list|create|setspawn|setspectator|delete|reload>
 #  Structure is filled automatically by the plugin.
 # ================================================================
 arenas: {}
@@ -95,3 +95,13 @@ stats:
   leaderboard:
     entries-per-page: 10
     refresh-minutes: 2
+
+# ================================================================
+#  Spectator
+#
+#  radius-blocks - maximum distance a spectator may stray from the
+#                  arena spectator spawn before being teleported
+#                  back to the border of the allowed area.
+# ================================================================
+spectator:
+  radius-blocks: 50

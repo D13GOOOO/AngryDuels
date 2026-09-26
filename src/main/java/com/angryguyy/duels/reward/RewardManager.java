@@ -195,27 +195,17 @@ public class RewardManager {
     }
 
     /**
-     * Grants rewards to the winner of a duel.
+     * Grants rewards to a specific winner of a duel.
      *
-     * <p>If rewards are disabled, if there is no winner, or if the
-     * winner is on cooldown, the method returns without scheduling
-     * anything. Otherwise it captures a {@link RewardContext} at the
-     * time the duel ends, applies the cooldown immediately, and
-     * schedules the actual granting after the configured delay, so the
-     * winner has already been teleported back to their pre-duel
-     * location.</p>
+     * <p>This overload is used when a match has multiple winners: the
+     * listener calls it once per winner, and each call is treated as an
+     * independent grant subject to the per-winner cooldown.</p>
      *
-     * <p>The winner is re-fetched by uuid inside the delayed task, so a
-     * disconnect-and-reconnect cycle within the delay window is handled
-     * correctly and the rewards are applied to the new player instance.
-     * If the winner is offline when the task runs, the rewards are
-     * silently skipped and the cooldown remains in place.</p>
-     *
-     * @param event the duel end event
+     * @param event  the duel end event
+     * @param winner the player receiving the rewards
      */
-    public void grant(DuelEndEvent event) {
+    public void grant(DuelEndEvent event, Player winner) {
         if (!enabled) return;
-        Player winner = event.getWinner();
         if (winner == null) return;
 
         if (cooldownSeconds > 0 && hasCooldown(winner.getUniqueId())) {

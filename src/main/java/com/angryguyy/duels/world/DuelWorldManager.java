@@ -1,6 +1,5 @@
 package com.angryguyy.duels.world;
 
-import java.io.File;
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.util.Log;
 import org.bukkit.Bukkit;
@@ -9,6 +8,8 @@ import org.bukkit.GameRules;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
+
+import java.io.File;
 
 /**
  * Owns the dedicated duel world and its gameplay rules.

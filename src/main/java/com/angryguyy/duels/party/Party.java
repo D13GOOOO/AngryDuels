@@ -31,11 +31,29 @@ public class Party {
      */
     public static final int MAX_MEMBERS = 20;
 
+    /**
+     * Database id of this party.
+     */
     private final long id;
+
+    /**
+     * Instant the party was created.
+     */
     private final Instant createdAt;
+
+    /**
+     * Members of the party, keyed by uuid and ordered by join time.
+     */
     private final Map<UUID, Instant> members;
 
+    /**
+     * Current leader of the party.
+     */
     private UUID leader;
+
+    /**
+     * Whether the party is publicly joinable.
+     */
     private boolean isPublic;
 
     /**

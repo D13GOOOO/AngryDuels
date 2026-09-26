@@ -10,7 +10,8 @@ import org.jetbrains.annotations.NotNull;
  * Fired after a party has been created.
  *
  * <p>Not cancellable: the party has already been stored by the time
- * listeners receive the event.</p>
+ * listeners receive the event. The event carries both the freshly
+ * created {@link Party} and the player who created it.</p>
  */
 public class PartyCreateEvent extends Event {
 
@@ -48,11 +49,21 @@ public class PartyCreateEvent extends Event {
         return leader;
     }
 
+    /**
+     * Returns the handler list for this event.
+     *
+     * @return handler list
+     */
     @Override
     public @NotNull HandlerList getHandlers() {
         return HANDLERS;
     }
 
+    /**
+     * Static accessor required by Bukkit's event dispatch system.
+     *
+     * @return handler list
+     */
     public static HandlerList getHandlerList() {
         return HANDLERS;
     }

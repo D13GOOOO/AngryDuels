@@ -2,11 +2,12 @@ package com.angryguyy.duels.command;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.arena.Arena;
+import com.angryguyy.duels.duel.DuelSession;
+import com.angryguyy.duels.gui.KitEditorGui;
 import com.angryguyy.duels.gui.KitSelectionGui;
 import com.angryguyy.duels.gui.LeaderboardGui;
 import com.angryguyy.duels.stats.LeaderboardCategory;
 import com.angryguyy.duels.util.Log;
-import com.angryguyy.duels.gui.KitEditorGui;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
@@ -31,9 +32,10 @@ import java.util.stream.Stream;
  * Handler for the {@code /duel} command and its subcommands.
  *
  * <p>The command is the single entry point for both player-facing
- * features (sending, accepting, denying or forfeiting a duel) and
- * administrative features (reloading the plugin, managing arenas, and
- * inspecting statistics). Subcommands are dispatched in
+ * features (sending, accepting, denying or forfeiting a duel, and
+ * spectating) and administrative features (reloading the plugin,
+ * managing arenas, and inspecting statistics). Subcommands are
+ * dispatched in
  * {@link #onCommand(CommandSender, Command, String, String[])} based on
  * the first argument.</p>
  *
@@ -43,6 +45,9 @@ import java.util.stream.Stream;
  */
 public class DuelsCommand implements CommandExecutor, TabCompleter {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**
@@ -54,21 +59,6 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
         this.plugin = plugin;
     }
 
-    /**
-     * Executes the command.
-     *
-     * <p>When no argument is supplied, the help page is shown. Otherwise
-     * the first argument is matched against the known subcommands; if no
-     * match is found, the argument is treated as the name of the player
-     * to challenge.</p>
-     *
-     * @param sender  source of the command
-     * @param command the command being executed
-     * @param label   alias used by the sender
-     * @param args    arguments provided after the command
-     * @return always {@code true} to prevent the server from displaying
-     *         its own usage message
-     */
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
@@ -90,17 +80,88 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             case "top" -> handleTop(sender, args);
             case "kiteditor" -> handleKitEditor(sender, args);
             case "kitreset" -> handleKitReset(sender, args);
+            case "spectate" -> handleSpectate(sender, args);
+            case "unspectate" -> handleUnspectate(sender);
             default -> handlePlayerTarget(sender, args);
         }
         return true;
     }
 
+    // ------------------------------------------------------------
+    // Spectate
+    // ------------------------------------------------------------
+
+    /**
+     * Starts spectating the duel of the named player.
+     *
+     * <p>The target must be online and currently in an active duel.
+     * The viewer must not be in a duel themselves. If both conditions
+     * hold, the viewer is switched to spectator mode, teleported to the
+     * arena's spectator spawn, and tracked by the spectator manager
+     * until the match ends or {@code /duel unspectate} is used.</p>
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the target player name
+     */
+    private void handleSpectate(CommandSender sender, String[] args) {
+        Player viewer = requirePlayer(sender);
+        if (viewer == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(viewer, "spectator.usage");
+            return;
+        }
+
+        if (plugin.spectators().isSpectating(viewer.getUniqueId())) {
+            plugin.messages().send(viewer, "spectator.already-spectating");
+            return;
+        }
+        if (plugin.duels().isInDuel(viewer.getUniqueId())) {
+            plugin.messages().send(viewer, "spectator.self-in-duel");
+            return;
+        }
+
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null || !target.isOnline()) {
+            plugin.messages().send(viewer, "duel.target-offline");
+            return;
+        }
+
+        DuelSession session = plugin.duels().getSession(target.getUniqueId());
+        if (session == null) {
+            plugin.messages().send(viewer, "spectator.target-not-in-duel");
+            return;
+        }
+
+        boolean started = plugin.spectators().startSpectating(viewer, session);
+        if (!started) {
+            plugin.messages().send(viewer, "spectator.start-failed");
+        }
+    }
+
+    /**
+     * Stops the sender from spectating.
+     *
+     * @param sender source of the command
+     */
+    private void handleUnspectate(CommandSender sender) {
+        Player viewer = requirePlayer(sender);
+        if (viewer == null) return;
+        if (!plugin.spectators().isSpectating(viewer.getUniqueId())) {
+            plugin.messages().send(viewer, "spectator.not-spectating");
+            return;
+        }
+        plugin.spectators().stopSpectating(viewer);
+    }
+
+    // ------------------------------------------------------------
+    // Arena management
+    // ------------------------------------------------------------
+
     /**
      * Dispatches the {@code arena} subcommand to its concrete handler.
      *
      * @param sender source of the command
-     * @param args   full argument array, where {@code args[1]} is the
-     *               arena action
+     * @param args   full argument array
      */
     private void handleArena(CommandSender sender, String[] args) {
         if (!sender.hasPermission("duels.admin")) {
@@ -117,7 +178,12 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             case "list" -> handleArenaList(sender);
             case "create" -> handleArenaCreate(sender, args);
             case "setspawn" -> handleArenaSetSpawn(sender, args);
+            case "setspectator" -> handleArenaSetSpectator(sender, args);
             case "delete" -> handleArenaDelete(sender, args);
+            case "addspawn" -> handleArenaAddTeamSpawn(sender, args);
+            case "delspawn" -> handleArenaDelTeamSpawn(sender, args);
+            case "clearspawns" -> handleArenaClearTeamSpawns(sender, args);
+            case "teamspawns" -> handleArenaListTeamSpawns(sender, args);
             case "reload" -> {
                 plugin.arenas().load();
                 plugin.messages().send(sender, "arena.reloaded");
@@ -127,7 +193,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Lists every registered arena with its current occupancy state.
+     * Lists every registered arena with its current occupancy state and
+     * team spawn counts.
      *
      * @param sender receiver of the output
      */
@@ -144,7 +211,9 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
                     Map.of(
                             "id", a.getId(),
                             "world", a.getWorld().getName(),
-                            "state", a.isOccupied() ? "occupied" : "free"
+                            "state", a.isOccupied() ? "occupied" : "free",
+                            "team1", String.valueOf(a.getTeam1Spawns().size()),
+                            "team2", String.valueOf(a.getTeam2Spawns().size())
                     ));
         }
     }
@@ -152,17 +221,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     /**
      * Creates a new arena at default spawn positions around the sender.
      *
-     * <p>The two spawn points are generated five blocks apart along the
-     * X axis, facing each other. Administrators are expected to refine
-     * them immediately with {@code /duel arena setspawn}.</p>
-     *
-     * <p>The sender must be inside the duel world; otherwise the
-     * generated spawn locations would belong to the wrong world and the
-     * arena would be unusable.</p>
-     *
      * @param sender source of the command; must be a player
-     * @param args   full argument array, where {@code args[2]} is the
-     *               new arena id
+     * @param args   full argument array
      */
     private void handleArenaCreate(CommandSender sender, String[] args) {
         if (args.length < 3) {
@@ -195,16 +255,10 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Updates one of the two spawn points of an existing arena.
-     *
-     * <p>The sender must be inside the duel world, for the same reason
-     * as {@link #handleArenaCreate(CommandSender, String[])}: a spawn
-     * captured in the wrong world would silently break the arena.</p>
+     * Updates one of the two legacy spawn points of an existing arena.
      *
      * @param sender source of the command; must be a player
-     * @param args   full argument array, where {@code args[2]} is the
-     *               arena id and {@code args[3]} is the spawn index
-     *               ({@code 1} or {@code 2})
+     * @param args   full argument array
      */
     private void handleArenaSetSpawn(CommandSender sender, String[] args) {
         if (args.length < 4) {
@@ -245,14 +299,42 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
+     * Sets the spectator spawn of an arena to the sender's current
+     * position.
+     *
+     * @param sender source of the command; must be a player inside the
+     *               duel world
+     * @param args   {@code args[2]} is the arena id
+     */
+    private void handleArenaSetSpectator(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        String id = args[2];
+        var arena = plugin.arenas().get(id);
+        if (arena == null) {
+            plugin.messages().send(sender, "arena.not-found", Map.of("id", id));
+            return;
+        }
+        if (!(sender instanceof Player p)) {
+            plugin.messages().send(sender, "general.player-only");
+            return;
+        }
+        if (!plugin.worlds().isDuelWorld(p.getWorld())) {
+            plugin.messages().send(sender, "arena.wrong-world");
+            return;
+        }
+        arena.setSpectatorSpawn(p.getLocation().clone());
+        plugin.arenas().save();
+        plugin.messages().send(sender, "arena.spectator-set", Map.of("id", id));
+    }
+
+    /**
      * Deletes an arena by id.
      *
-     * <p>The arena cannot be deleted while it is occupied by an active
-     * duel; the caller is informed with a dedicated message.</p>
-     *
      * @param sender source of the command
-     * @param args   full argument array, where {@code args[2]} is the
-     *               arena id
+     * @param args   full argument array
      */
     private void handleArenaDelete(CommandSender sender, String[] args) {
         if (args.length < 3) {
@@ -274,6 +356,184 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
+     * Adds a team spawn to an existing arena.
+     *
+     * @param sender source of the command; must be a player inside the duel world
+     * @param args   {@code args[2]} arena id, {@code args[3]} team (1 or 2)
+     */
+    private void handleArenaAddTeamSpawn(CommandSender sender, String[] args) {
+        if (args.length < 4) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        String id = args[2];
+        var arena = plugin.arenas().get(id);
+        if (arena == null) {
+            plugin.messages().send(sender, "arena.not-found", Map.of("id", id));
+            return;
+        }
+        if (!(sender instanceof Player p)) {
+            plugin.messages().send(sender, "general.player-only");
+            return;
+        }
+        if (!plugin.worlds().isDuelWorld(p.getWorld())) {
+            plugin.messages().send(sender, "arena.wrong-world");
+            return;
+        }
+        int team = parseTeam(args[3]);
+        if (team == 0) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        arena.addTeamSpawn(team, p.getLocation().clone());
+        plugin.arenas().save();
+        int total = arena.getTeam1Spawns().size() + arena.getTeam2Spawns().size();
+        plugin.messages().send(sender, "arena.team-spawn-added", Map.of(
+                "id", id,
+                "team", String.valueOf(team),
+                "index", String.valueOf(total)
+        ));
+    }
+
+    /**
+     * Removes a team spawn from an arena.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[2]} arena id, {@code args[3]} team,
+     *               {@code args[4]} one-based index
+     */
+    private void handleArenaDelTeamSpawn(CommandSender sender, String[] args) {
+        if (args.length < 5) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        String id = args[2];
+        var arena = plugin.arenas().get(id);
+        if (arena == null) {
+            plugin.messages().send(sender, "arena.not-found", Map.of("id", id));
+            return;
+        }
+        int team = parseTeam(args[3]);
+        if (team == 0) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(args[4]);
+        } catch (NumberFormatException e) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        Location removed = arena.removeTeamSpawn(team, index);
+        if (removed == null) {
+            plugin.messages().send(sender, "arena.spawn-index-invalid", Map.of(
+                    "team", String.valueOf(team),
+                    "index", String.valueOf(index)
+            ));
+            return;
+        }
+        plugin.arenas().save();
+        plugin.messages().send(sender, "arena.team-spawn-removed", Map.of(
+                "id", id,
+                "team", String.valueOf(team),
+                "index", String.valueOf(index)
+        ));
+    }
+
+    /**
+     * Clears every team spawn of an arena.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[2]} arena id
+     */
+    private void handleArenaClearTeamSpawns(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        String id = args[2];
+        var arena = plugin.arenas().get(id);
+        if (arena == null) {
+            plugin.messages().send(sender, "arena.not-found", Map.of("id", id));
+            return;
+        }
+        arena.clearTeamSpawns(1);
+        arena.clearTeamSpawns(2);
+        plugin.arenas().save();
+        plugin.messages().send(sender, "arena.team-spawns-cleared", Map.of("id", id));
+    }
+
+    /**
+     * Lists the team spawns of an arena.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[2]} arena id
+     */
+    private void handleArenaListTeamSpawns(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            plugin.messages().send(sender, "arena.usage");
+            return;
+        }
+        String id = args[2];
+        var arena = plugin.arenas().get(id);
+        if (arena == null) {
+            plugin.messages().send(sender, "arena.not-found", Map.of("id", id));
+            return;
+        }
+        var team1 = arena.getTeam1Spawns();
+        var team2 = arena.getTeam2Spawns();
+        plugin.messages().send(sender, "arena.team-spawns-header",
+                Map.of("id", id,
+                        "count1", String.valueOf(team1.size()),
+                        "count2", String.valueOf(team2.size())));
+        for (int i = 0; i < team1.size(); i++) {
+            sendTeamSpawnEntry(sender, 1, i + 1, team1.get(i));
+        }
+        for (int i = 0; i < team2.size(); i++) {
+            sendTeamSpawnEntry(sender, 2, i + 1, team2.get(i));
+        }
+    }
+
+    /**
+     * Sends a formatted team spawn entry to the sender.
+     *
+     * @param sender receiver of the entry
+     * @param team   team index
+     * @param index  one-based spawn index
+     * @param l      spawn location
+     */
+    private void sendTeamSpawnEntry(CommandSender sender, int team, int index, Location l) {
+        plugin.messages().send(sender, "arena.team-spawn-entry", Map.of(
+                "team", String.valueOf(team),
+                "index", String.valueOf(index),
+                "x", String.format(Locale.ROOT, "%.1f", l.getX()),
+                "y", String.format(Locale.ROOT, "%.1f", l.getY()),
+                "z", String.format(Locale.ROOT, "%.1f", l.getZ())
+        ));
+    }
+
+    /**
+     * Parses a team index, returning {@code 0} when the input is not
+     * {@code 1} or {@code 2}.
+     *
+     * @param arg raw argument
+     * @return parsed team, or {@code 0}
+     */
+    private int parseTeam(String arg) {
+        try {
+            int t = Integer.parseInt(arg);
+            return (t == 1 || t == 2) ? t : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Generic lifecycle
+    // ------------------------------------------------------------
+
+    /**
      * Sends the help page to the sender.
      *
      * @param sender receiver of the help page
@@ -284,10 +544,6 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
 
     /**
      * Reloads both {@code config.yml} and {@code messages.yml}.
-     *
-     * <p>Any exception thrown during the reload is caught and reported
-     * to the sender without crashing the plugin, so that a broken YAML
-     * file does not require a server restart.</p>
      *
      * @param sender source of the command; requires {@code duels.admin}
      */
@@ -308,7 +564,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Accepts the sender's pending incoming duel request.
+     * Accepts the incoming duel request of the sender.
      *
      * @param sender source of the command
      */
@@ -319,7 +575,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Denies the sender's pending incoming duel request.
+     * Denies the incoming duel request of the sender.
      *
      * @param sender source of the command
      */
@@ -330,7 +586,7 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Makes the sender forfeit their active duel.
+     * Makes the sender forfeit their current duel.
      *
      * @param sender source of the command
      */
@@ -343,10 +599,9 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     /**
      * Sends a duel request from the sender to the named player.
      *
-     * <p>If a kit is provided as the second argument, the request is
-     * sent immediately with that kit. Otherwise, the kit selection GUI
-     * is opened so the sender can pick a kit visually. When the player
-     * clicks a kit, the request is sent by the GUI listener.</p>
+     * <p>When a kit is provided as second argument, the request is sent
+     * directly. Otherwise a kit selection GUI is opened. In both cases
+     * the sender may not challenge themselves.</p>
      *
      * @param sender source of the command; must be a player
      * @param args   full argument array
@@ -360,8 +615,12 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        if (args.length >= 2) {
-            plugin.duels().sendRequest(player, target, args[1]);
+        if (plugin.spectators().isSpectating(player.getUniqueId())) {
+            plugin.messages().send(player, "spectator.self-in-duel");
+            return;
+        }
+        if (plugin.spectators().isSpectating(target.getUniqueId())) {
+            plugin.messages().send(player, "spectator.target-in-duel");
             return;
         }
 
@@ -370,15 +629,20 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        if (args.length >= 2) {
+            plugin.duels().sendRequest(player, target, args[1]);
+            return;
+        }
+
         KitSelectionGui.open(plugin, player, target);
     }
 
     /**
-     * Ensures the sender is a player and reports an error otherwise.
+     * Resolves a command sender to a player, sending the standard
+     * player-only message when the sender is not a player.
      *
      * @param sender source of the command
-     * @return the sender cast to {@link Player}, or {@code null} if the
-     *         sender is not a player
+     * @return the player, or {@code null}
      */
     private @Nullable Player requirePlayer(CommandSender sender) {
         if (!(sender instanceof Player p)) {
@@ -388,17 +652,14 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
         return p;
     }
 
+    // ------------------------------------------------------------
+    // Stats
+    // ------------------------------------------------------------
+
     /**
-     * Dispatches the {@code stats} subcommand.
-     *
-     * <p>If the second argument is {@code reset} or {@code resetall},
-     * the request is routed to the administrative reset handler.
-     * Otherwise the command displays the stats of a target player or of
-     * the sender itself.</p>
-     *
-     * <p>If the stats subsystem is not available (database offline or
-     * disabled in config), a dedicated message is shown instead of a
-     * misleading "no data" reply.</p>
+     * Dispatches the {@code stats} subcommand, handling the special
+     * reset and resetall actions before falling through to the
+     * per-player display.
      *
      * @param sender source of the command
      * @param args   full argument array
@@ -438,15 +699,11 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Displays a stats snapshot to the sender.
+     * Reads and displays the stats snapshot of a player.
      *
-     * <p>Values that are percentages or ratios are formatted with a
-     * single or double decimal respectively, so that the output is
-     * stable regardless of locale.</p>
-     *
-     * @param sender   receiver
+     * @param sender   receiver of the output
      * @param uuid     player uuid
-     * @param fallback username to display if the snapshot lacks one
+     * @param fallback name to show if the snapshot is missing one
      */
     private void displayStats(CommandSender sender, UUID uuid, String fallback) {
         var snapshot = plugin.stats().readStats(uuid);
@@ -477,16 +734,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Dispatches the {@code top} subcommand.
-     *
-     * <p>Without a second argument the usage message is shown. The
-     * second argument selects a category; the optional third argument
-     * selects a page or requests the GUI. Out-of-range pages are
-     * clamped to the last available page, so an over-large page number
-     * never results in a blank output.</p>
-     *
-     * <p>If the stats subsystem is not available (database offline or
-     * disabled in config), a dedicated message is shown.</p>
+     * Displays a leaderboard page, either in chat or in the GUI when
+     * the literal {@code gui} argument is passed.
      *
      * @param sender source of the command
      * @param args   full argument array
@@ -545,7 +794,8 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Handles the reset and resetall subcommands.
+     * Handles the {@code stats reset} and {@code stats resetall}
+     * administrative actions.
      *
      * @param sender source of the command; requires {@code duels.admin}
      * @param args   full argument array
@@ -580,29 +830,69 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
         Log.info("Stats reset for %s by %s", args[2], sender.getName());
     }
 
+    // ------------------------------------------------------------
+    // Kit editor
+    // ------------------------------------------------------------
+
     /**
-     * Provides context-aware tab completion.
+     * Opens the kit editor for a kit the sender can use.
      *
-     * <p>Completion is layered: the first argument suggests subcommands
-     * and online player names, the second argument suggests arena
-     * actions, kit ids, leaderboard categories or reset actions
-     * depending on the subcommand, and deeper arguments suggest arena
-     * ids or spawn indexes. Administrative entries are hidden from
-     * senders without the {@code duels.admin} permission.</p>
-     *
-     * @param sender  source of the completion request
-     * @param command the command being completed
-     * @param alias   alias used by the sender
-     * @param args    arguments typed so far
-     * @return list of completion candidates, possibly empty
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the kit id or alias
      */
+    private void handleKitEditor(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(player, "kit.editor-usage");
+            return;
+        }
+        var kit = plugin.kits().resolve(args[1]);
+        if (kit == null) {
+            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
+            return;
+        }
+        if (!player.hasPermission(kit.getPermission())) {
+            plugin.messages().send(player, "kit.no-permission");
+            return;
+        }
+        KitEditorGui.open(plugin, player, kit);
+    }
+
+    /**
+     * Clears the personal layout override of a kit for the sender.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the kit id or alias
+     */
+    private void handleKitReset(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(player, "kit.editor-reset-usage");
+            return;
+        }
+        var kit = plugin.kits().resolve(args[1]);
+        if (kit == null) {
+            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
+            return;
+        }
+        plugin.playerKits().clearOverride(player.getUniqueId(), kit.getId());
+        plugin.messages().send(player, "kit.editor-reset", Map.of("kit", kit.getId()));
+    }
+
+    // ------------------------------------------------------------
+    // Tab completion
+    // ------------------------------------------------------------
+
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
                                                 @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
             List<String> options = new ArrayList<>(
-                    List.of("help", "accept", "deny", "forfeit", "stats", "top", "kiteditor", "kitreset"));
+                    List.of("help", "accept", "deny", "forfeit", "stats", "top",
+                            "kiteditor", "kitreset", "spectate", "unspectate"));
             if (sender.hasPermission("duels.admin")) {
                 options.add("reload");
                 options.add("arena");
@@ -619,14 +909,18 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 2 && args[0].equalsIgnoreCase("arena") && sender.hasPermission("duels.admin")) {
             String prefix = args[1].toLowerCase(Locale.ROOT);
-            return Stream.of("list", "create", "setspawn", "delete", "reload")
+            return Stream.of("list", "create", "setspawn", "setspectator", "delete",
+                            "addspawn", "delspawn", "clearspawns", "teamspawns", "reload")
                     .filter(s -> s.startsWith(prefix))
                     .toList();
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("arena") && sender.hasPermission("duels.admin")) {
             String action = args[1].toLowerCase(Locale.ROOT);
-            if (action.equals("setspawn") || action.equals("delete")) {
+            if (action.equals("setspawn") || action.equals("setspectator")
+                    || action.equals("delete")
+                    || action.equals("addspawn") || action.equals("delspawn")
+                    || action.equals("clearspawns") || action.equals("teamspawns")) {
                 String prefix = args[2].toLowerCase(Locale.ROOT);
                 return plugin.arenas().all().stream()
                         .map(Arena::getId)
@@ -636,11 +930,26 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 4 && args[0].equalsIgnoreCase("arena")
-                && args[1].equalsIgnoreCase("setspawn")
                 && sender.hasPermission("duels.admin")) {
-            String prefix = args[3].toLowerCase(Locale.ROOT);
-            return Stream.of("1", "2")
-                    .filter(s -> s.startsWith(prefix))
+            String action = args[1].toLowerCase(Locale.ROOT);
+            if (action.equals("setspawn") || action.equals("addspawn")
+                    || action.equals("delspawn")) {
+                String prefix = args[3].toLowerCase(Locale.ROOT);
+                return Stream.of("1", "2")
+                        .filter(s -> s.startsWith(prefix))
+                        .toList();
+            }
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("spectate")) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            List<String> names = new ArrayList<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (!plugin.duels().isInDuel(p.getUniqueId())) continue;
+                names.add(p.getName());
+            }
+            return names.stream()
+                    .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(prefix))
                     .toList();
         }
 
@@ -699,72 +1008,18 @@ public class DuelsCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Returns whether an argument matches a known top-level subcommand.
+     * Checks whether a token is one of the top-level subcommands of
+     * the {@code /duel} command.
      *
-     * <p>Used by tab completion to distinguish between a subcommand and
-     * a player name typed as the first argument.</p>
-     *
-     * @param arg argument to test
-     * @return {@code true} if the argument is a known subcommand
+     * @param arg token to test
+     * @return {@code true} if the token is a known subcommand
      */
     private boolean isSubcommand(String arg) {
         return switch (arg.toLowerCase(Locale.ROOT)) {
             case "help", "reload", "accept", "deny", "forfeit", "arena",
-                 "stats", "top", "kiteditor", "kitreset" -> true;
+                 "stats", "top", "kiteditor", "kitreset",
+                 "spectate", "unspectate" -> true;
             default -> false;
         };
-    }
-
-    /**
-     * Opens the kit editor GUI for the sender.
-     *
-     * <p>The sender must have the permission of the kit being edited.
-     * The starting layout is the player's personal override if it
-     * exists, otherwise the default kit layout.</p>
-     *
-     * @param sender source of the command; must be a player
-     * @param args   full argument array, where {@code args[1]} is the
-     *               kit id or alias
-     */
-    private void handleKitEditor(CommandSender sender, String[] args) {
-        Player player = requirePlayer(sender);
-        if (player == null) return;
-        if (args.length < 2) {
-            plugin.messages().send(player, "kit.editor-usage");
-            return;
-        }
-        var kit = plugin.kits().resolve(args[1]);
-        if (kit == null) {
-            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
-            return;
-        }
-        if (!player.hasPermission(kit.getPermission())) {
-            plugin.messages().send(player, "kit.no-permission");
-            return;
-        }
-        KitEditorGui.open(plugin, player, kit);
-    }
-
-    /**
-     * Clears the sender's personal layout for a kit.
-     *
-     * @param sender source of the command; must be a player
-     * @param args   full argument array, where {@code args[1]} is the
-     *               kit id or alias
-     */
-    private void handleKitReset(CommandSender sender, String[] args) {
-        Player player = requirePlayer(sender);
-        if (player == null) return;
-        if (args.length < 2) {
-            plugin.messages().send(player, "kit.editor-reset-usage");
-            return;
-        }
-        var kit = plugin.kits().resolve(args[1]);
-        if (kit == null) {
-            plugin.messages().send(player, "kit.not-found", Map.of("kit", args[1]));
-            return;
-        }
-        plugin.playerKits().clearOverride(player.getUniqueId(), kit.getId());
-        plugin.messages().send(player, "kit.editor-reset", Map.of("kit", kit.getId()));
     }
 }

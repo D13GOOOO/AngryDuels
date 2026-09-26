@@ -31,9 +31,19 @@ import java.util.List;
  */
 public final class LeaderboardGui {
 
+    /**
+     * Total number of slots of the inventory.
+     */
     private static final int SIZE = 54;
+
+    /**
+     * Maximum number of entries displayed before the navigation row.
+     */
     private static final int MAX_ENTRIES = 45;
 
+    /**
+     * Prevents instantiation.
+     */
     private LeaderboardGui() {
     }
 

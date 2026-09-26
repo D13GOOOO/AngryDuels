@@ -1,6 +1,8 @@
 package com.angryguyy.duels.stats;
 
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Enumerates the leaderboard categories available to players and
@@ -8,8 +10,9 @@ import java.util.Locale;
  *
  * <p>Each category maps to a specific SQL ordering and a display label
  * used in command output and in the GUI title. The {@link #fromString}
- * helper parses a category from a command argument in a case-insensitive
- * way.</p>
+ * helper parses a category from a command argument in a
+ * case-insensitive way, using a precomputed lookup map so the lookup
+ * is constant time.</p>
  */
 public enum LeaderboardCategory {
 
@@ -41,7 +44,16 @@ public enum LeaderboardCategory {
     /**
      * Ranking by kill/death ratio.
      */
-    KDR("kdr", "K/D Ratio", "CASE WHEN deaths = 0 THEN kills ELSE kills / deaths END DESC");
+    KDR("kdr", "K/D Ratio",
+            "CASE WHEN deaths = 0 THEN kills ELSE kills / deaths END DESC");
+
+    private static final Map<String, LeaderboardCategory> BY_ID = new HashMap<>();
+
+    static {
+        for (LeaderboardCategory category : values()) {
+            BY_ID.put(category.id, category);
+        }
+    }
 
     private final String id;
     private final String label;
@@ -88,10 +100,6 @@ public enum LeaderboardCategory {
      */
     public static LeaderboardCategory fromString(String input) {
         if (input == null) return null;
-        String lower = input.toLowerCase(Locale.ROOT);
-        for (LeaderboardCategory c : values()) {
-            if (c.id.equals(lower)) return c;
-        }
-        return null;
+        return BY_ID.get(input.toLowerCase(Locale.ROOT));
     }
 }

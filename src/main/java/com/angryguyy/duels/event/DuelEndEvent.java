@@ -8,6 +8,8 @@ import org.bukkit.event.HandlerList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * Fired after a duel session has been terminated.
  *
@@ -16,35 +18,37 @@ import org.jetbrains.annotations.Nullable;
  * and server shutdown. It is <b>not</b> cancellable: the duel has
  * already concluded by the time listeners receive it.</p>
  *
- * <p>Listeners can use this event to update statistics, run reward
- * scripts, broadcast results, or trigger any downstream effect that
- * should follow a duel. The {@code winner} and {@code loser} may be
- * {@code null} for scenarios where no opponent was determined, such as
- * a cancelled duel or a shut down server.</p>
+ * <p>Winners and losers are exposed as immutable lists so that team
+ * matches are fully represented. In a 1v1 each list contains a single
+ * player, and both lists are empty for a cancelled or drawn duel.</p>
+ *
+ * <p>For convenience, {@link #getWinner()} and {@link #getLoser()}
+ * return the first element of the corresponding list, or {@code null}
+ * if the list is empty. New code should prefer the list-based
+ * accessors to be team-aware.</p>
  */
 public class DuelEndEvent extends Event {
 
     private static final HandlerList HANDLERS = new HandlerList();
 
     private final DuelSession session;
-    private final @Nullable Player winner;
-    private final @Nullable Player loser;
+    private final List<Player> winners;
+    private final List<Player> losers;
     private final DuelEndReason reason;
 
     /**
      * Creates a new duel end event.
      *
      * @param session the session that just ended
-     * @param winner  the winning player, or {@code null} if there is
-     *                no winner
-     * @param loser   the losing player, or {@code null} if there is
-     *                no loser
+     * @param winners list of winning players, possibly empty
+     * @param losers  list of losing players, possibly empty
      * @param reason  the reason the duel ended
      */
-    public DuelEndEvent(DuelSession session, @Nullable Player winner, @Nullable Player loser, DuelEndReason reason) {
+    public DuelEndEvent(DuelSession session, List<Player> winners,
+                        List<Player> losers, DuelEndReason reason) {
         this.session = session;
-        this.winner = winner;
-        this.loser = loser;
+        this.winners = List.copyOf(winners);
+        this.losers = List.copyOf(losers);
         this.reason = reason;
     }
 
@@ -58,21 +62,39 @@ public class DuelEndEvent extends Event {
     }
 
     /**
-     * Returns the winning player, if any.
+     * Returns an immutable list of winning players.
      *
-     * @return winner, or {@code null}
+     * @return winners, possibly empty
      */
-    public @Nullable Player getWinner() {
-        return winner;
+    public List<Player> getWinners() {
+        return winners;
     }
 
     /**
-     * Returns the losing player, if any.
+     * Returns an immutable list of losing players.
      *
-     * @return loser, or {@code null}
+     * @return losers, possibly empty
+     */
+    public List<Player> getLosers() {
+        return losers;
+    }
+
+    /**
+     * Returns the first winner, for convenience.
+     *
+     * @return first winner, or {@code null} if there are none
+     */
+    public @Nullable Player getWinner() {
+        return winners.isEmpty() ? null : winners.get(0);
+    }
+
+    /**
+     * Returns the first loser, for convenience.
+     *
+     * @return first loser, or {@code null} if there are none
      */
     public @Nullable Player getLoser() {
-        return loser;
+        return losers.isEmpty() ? null : losers.get(0);
     }
 
     /**

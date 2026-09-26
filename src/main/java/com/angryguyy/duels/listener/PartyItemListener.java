@@ -1,7 +1,10 @@
 package com.angryguyy.duels.listener;
 
 import com.angryguyy.duels.DuelsPlugin;
+import com.angryguyy.duels.gui.PartyDisbandConfirmGui;
 import com.angryguyy.duels.gui.PartyFightGui;
+import com.angryguyy.duels.gui.PartyInfoGui;
+import com.angryguyy.duels.gui.PartyInviteGui;
 import com.angryguyy.duels.party.Party;
 import com.angryguyy.duels.party.item.PartyItemFactory;
 import com.angryguyy.duels.party.item.PartyItemType;
@@ -35,6 +38,9 @@ import org.bukkit.inventory.ItemStack;
  */
 public class PartyItemListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**
@@ -142,6 +148,16 @@ public class PartyItemListener implements Listener {
         }
     }
 
+    /**
+     * Opens the GUI associated with the used party item.
+     *
+     * <p>The player must still be in a party and be its leader; both
+     * conditions are re-checked at use time, since the item may have
+     * survived a leadership transfer or a disband.</p>
+     *
+     * @param player the player who used the item
+     * @param type   the item type
+     */
     private void handleUse(Player player, PartyItemType type) {
         Party party = plugin.parties().getParty(player.getUniqueId());
         if (party == null) return;
@@ -158,9 +174,9 @@ public class PartyItemListener implements Listener {
                 }
                 PartyFightGui.open(plugin, player, party);
             }
-            case INFO -> plugin.messages().send(player, "party.info-gui-soon");
-            case INVITE -> plugin.messages().send(player, "party.invite-gui-soon");
-            case DISBAND -> plugin.messages().send(player, "party.disband-gui-soon");
+            case INFO -> PartyInfoGui.open(plugin, player, party);
+            case INVITE -> PartyInviteGui.open(plugin, player, party, 0);
+            case DISBAND -> PartyDisbandConfirmGui.open(plugin, player, party);
         }
     }
 }

@@ -6,6 +6,7 @@ import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -21,20 +22,37 @@ import java.util.UUID;
  * plugin GUIs from third-party inventories, since titles can be edited
  * by players and item names are not guaranteed to be unique.</p>
  *
- * <p>The mapping returned by {@link #getSlotToKit()} is an unmodifiable
- * view, so the click listener cannot accidentally corrupt the holder
- * by mutating the returned map.</p>
+ * <p>The slot-to-kit mapping is copied at construction time and exposed
+ * through an unmodifiable view, so neither the caller nor the click
+ * listener can mutate the holder's internal state.</p>
  */
 public class KitGuiHolder implements InventoryHolder {
 
+    /**
+     * Uuid of the player viewing the GUI.
+     */
     private final UUID viewer;
+
+    /**
+     * Uuid of the duel target.
+     */
     private final UUID target;
+
+    /**
+     * Mapping from inventory slot to kit, owned by this holder.
+     */
     private final Map<Integer, Kit> slotToKit;
 
+    /**
+     * Inventory instance attached to this holder.
+     */
     private Inventory inventory;
 
     /**
      * Creates a new holder.
+     *
+     * <p>The mapping is copied defensively so that the caller cannot
+     * mutate the holder's state after construction.</p>
      *
      * @param viewer    uuid of the player viewing the GUI
      * @param target    uuid of the duel target
@@ -43,7 +61,7 @@ public class KitGuiHolder implements InventoryHolder {
     public KitGuiHolder(UUID viewer, UUID target, Map<Integer, Kit> slotToKit) {
         this.viewer = viewer;
         this.target = target;
-        this.slotToKit = slotToKit;
+        this.slotToKit = new HashMap<>(slotToKit);
     }
 
     /**

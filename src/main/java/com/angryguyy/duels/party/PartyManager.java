@@ -50,21 +50,49 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class PartyManager {
 
-    /** Duration of a pending invitation, in seconds. */
+    /**
+     * Duration of a pending invitation, in seconds.
+     */
     private static final int INVITE_TIMEOUT_SECONDS = 30;
 
-    /** Interval between invitation expiry checks, in ticks. */
+    /**
+     * Interval between invitation expiry checks, in ticks.
+     */
     private static final long INVITE_SWEEP_INTERVAL_TICKS = 20L * 30L;
 
+    /**
+     * Owning plugin.
+     */
     private final DuelsPlugin plugin;
+
+    /**
+     * Underlying database manager.
+     */
     private final DatabaseManager database;
 
+    /**
+     * Parties by id.
+     */
     private final Map<Long, Party> parties = new HashMap<>();
+
+    /**
+     * Mapping from player uuid to party id.
+     */
     private final Map<UUID, Long> playerToParty = new HashMap<>();
+
+    /**
+     * Pending invitations keyed by invitee uuid.
+     */
     private final Map<UUID, PartyInvite> invitesByInvitee = new HashMap<>();
 
+    /**
+     * Next party id to assign.
+     */
     private final AtomicLong nextPartyId = new AtomicLong(1);
 
+    /**
+     * The scheduled invitation sweeper task, if running.
+     */
     private BukkitTask sweepTask;
 
     /**
@@ -85,6 +113,10 @@ public class PartyManager {
      * <p>Called once on startup. If the database is unavailable, the
      * manager stays empty and every public method becomes a no-op until
      * the plugin is restarted.</p>
+     *
+     * <p>The method is idempotent: any data already held in memory is
+     * discarded before the reload, and the invitation sweeper is only
+     * started when the load succeeds.</p>
      */
     public void load() {
         if (!database.isReady()) {
@@ -92,6 +124,11 @@ public class PartyManager {
             return;
         }
 
+        parties.clear();
+        playerToParty.clear();
+        invitesByInvitee.clear();
+
+        boolean success = false;
         try (Connection conn = database.getDataSource().getConnection()) {
             long maxId = 0;
 
@@ -139,13 +176,16 @@ public class PartyManager {
             }
 
             nextPartyId.set(maxId + 1);
+            success = true;
             Log.info("Loaded %d party(ies), %d pending invite(s).",
                     parties.size(), invitesByInvitee.size());
         } catch (SQLException e) {
             Log.error(e, "Failed to load parties from database");
         }
 
-        startInviteSweeper();
+        if (success) {
+            startInviteSweeper();
+        }
     }
 
     /**
@@ -225,13 +265,16 @@ public class PartyManager {
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
                 try (Connection conn = database.getDataSource().getConnection()) {
                     try (PreparedStatement ps = conn.prepareStatement(
-                            "INSERT INTO duels_parties (id, leader_uuid) VALUES (?, ?)")) {
+                            "INSERT INTO duels_parties (id, leader_uuid, created_at) "
+                                    + "VALUES (?, ?, ?)")) {
                         ps.setLong(1, id);
                         ps.setString(2, uuid.toString());
+                        ps.setTimestamp(3, Timestamp.from(now));
                         ps.executeUpdate();
                     }
                     try (PreparedStatement ps = conn.prepareStatement(
-                            "INSERT INTO duels_party_members (party_id, uuid, joined_at) VALUES (?, ?, ?)")) {
+                            "INSERT INTO duels_party_members (party_id, uuid, joined_at) "
+                                    + "VALUES (?, ?, ?)")) {
                         ps.setLong(1, id);
                         ps.setString(2, uuid.toString());
                         ps.setTimestamp(3, Timestamp.from(now));
@@ -271,25 +314,28 @@ public class PartyManager {
         invitesByInvitee.put(invitee.getUniqueId(), invite);
 
         if (database.isReady()) {
+            UUID inviterId = inviter.getUniqueId();
+            UUID inviteeId = invitee.getUniqueId();
+            long partyId = party.getId();
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
                 try (Connection conn = database.getDataSource().getConnection()) {
                     try (PreparedStatement ps = conn.prepareStatement(
                             "DELETE FROM duels_party_invites WHERE invitee = ?")) {
-                        ps.setString(1, invitee.getUniqueId().toString());
+                        ps.setString(1, inviteeId.toString());
                         ps.executeUpdate();
                     }
                     try (PreparedStatement ps = conn.prepareStatement(
                             "INSERT INTO duels_party_invites (party_id, inviter, invitee, expires_at) "
                                     + "VALUES (?, ?, ?, ?)")) {
-                        ps.setLong(1, party.getId());
-                        ps.setString(2, inviter.getUniqueId().toString());
-                        ps.setString(3, invitee.getUniqueId().toString());
+                        ps.setLong(1, partyId);
+                        ps.setString(2, inviterId.toString());
+                        ps.setString(3, inviteeId.toString());
                         ps.setTimestamp(4, Timestamp.from(expiresAt));
                         ps.executeUpdate();
                     }
                 } catch (SQLException e) {
                     Log.error(e, "Failed to persist invite from %s to %s",
-                            inviter.getUniqueId(), invitee.getUniqueId());
+                            inviterId, inviteeId);
                 }
             });
         }
@@ -300,49 +346,65 @@ public class PartyManager {
     /**
      * Accepts the pending invitation of a player.
      *
+     * <p>The invitation is removed from the cache in every outcome,
+     * including when the party no longer exists, when the player is
+     * already in another party, or when the target party is full, so
+     * that a stale entry never lingers.</p>
+     *
      * @param invitee the invited player
      * @return the party the player joined, or {@code null} if the
-     *         invitation is missing or expired
+     *         invitation is missing, expired or no longer usable
      */
     public Party acceptInvite(Player invitee) {
-        PartyInvite invite = invitesByInvitee.get(invitee.getUniqueId());
-        if (invite == null || invite.isExpired()) return null;
+        UUID inviteeId = invitee.getUniqueId();
+        PartyInvite invite = invitesByInvitee.get(inviteeId);
+        if (invite == null || invite.isExpired()) {
+            invitesByInvitee.remove(inviteeId);
+            return null;
+        }
 
         Party party = parties.get(invite.partyId());
         if (party == null) {
-            invitesByInvitee.remove(invitee.getUniqueId());
+            invitesByInvitee.remove(inviteeId);
             return null;
         }
-        if (isInParty(invitee.getUniqueId())) return null;
-        if (party.size() >= Party.MAX_MEMBERS) return null;
+        if (isInParty(inviteeId)) {
+            invitesByInvitee.remove(inviteeId);
+            return null;
+        }
+        if (party.size() >= Party.MAX_MEMBERS) {
+            invitesByInvitee.remove(inviteeId);
+            return null;
+        }
 
-        invitesByInvitee.remove(invitee.getUniqueId());
+        invitesByInvitee.remove(inviteeId);
 
         Instant now = Instant.now();
-        party.addMember(invitee.getUniqueId(), now);
-        playerToParty.put(invitee.getUniqueId(), party.getId());
+        party.addMember(inviteeId, now);
+        playerToParty.put(inviteeId, party.getId());
 
         Bukkit.getPluginManager().callEvent(
-                new PartyJoinEvent(party, invitee.getUniqueId(), invite.inviter()));
+                new PartyJoinEvent(party, inviteeId, invite.inviter()));
 
         if (database.isReady()) {
+            long partyId = party.getId();
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
                 try (Connection conn = database.getDataSource().getConnection()) {
                     try (PreparedStatement ps = conn.prepareStatement(
                             "DELETE FROM duels_party_invites WHERE invitee = ?")) {
-                        ps.setString(1, invitee.getUniqueId().toString());
+                        ps.setString(1, inviteeId.toString());
                         ps.executeUpdate();
                     }
                     try (PreparedStatement ps = conn.prepareStatement(
                             "INSERT INTO duels_party_members (party_id, uuid, joined_at) "
                                     + "VALUES (?, ?, ?)")) {
-                        ps.setLong(1, party.getId());
-                        ps.setString(2, invitee.getUniqueId().toString());
+                        ps.setLong(1, partyId);
+                        ps.setString(2, inviteeId.toString());
                         ps.setTimestamp(3, Timestamp.from(now));
                         ps.executeUpdate();
                     }
                 } catch (SQLException e) {
-                    Log.error(e, "Failed to persist party join for %s", invitee.getUniqueId());
+                    Log.error(e, "Failed to persist party join for %s", inviteeId);
                 }
             });
         }
@@ -357,7 +419,8 @@ public class PartyManager {
      * @return {@code true} if an invitation was removed
      */
     public boolean denyInvite(Player invitee) {
-        PartyInvite removed = invitesByInvitee.remove(invitee.getUniqueId());
+        UUID inviteeId = invitee.getUniqueId();
+        PartyInvite removed = invitesByInvitee.remove(inviteeId);
         if (removed == null) return false;
 
         if (database.isReady()) {
@@ -365,10 +428,10 @@ public class PartyManager {
                 try (Connection conn = database.getDataSource().getConnection();
                      PreparedStatement ps = conn.prepareStatement(
                              "DELETE FROM duels_party_invites WHERE invitee = ?")) {
-                    ps.setString(1, invitee.getUniqueId().toString());
+                    ps.setString(1, inviteeId.toString());
                     ps.executeUpdate();
                 } catch (SQLException e) {
-                    Log.error(e, "Failed to deny invite for %s", invitee.getUniqueId());
+                    Log.error(e, "Failed to deny invite for %s", inviteeId);
                 }
             });
         }
@@ -410,7 +473,7 @@ public class PartyManager {
         if (!party.isMember(target) || party.isLeader(target)) return false;
 
         party.setLeader(target);
-        persistLeader(party);
+        persistLeader(party, target);
 
         return true;
     }
@@ -430,8 +493,9 @@ public class PartyManager {
         Party party = getParty(player.getUniqueId());
         if (party == null) return null;
 
-        UUID promoted = party.removeMember(player.getUniqueId());
-        playerToParty.remove(player.getUniqueId());
+        UUID uuid = player.getUniqueId();
+        UUID promoted = party.removeMember(uuid);
+        playerToParty.remove(uuid);
 
         if (party.size() == 0) {
             disbandInternal(party, PartyLeaveEvent.Reason.LEFT_LAST);
@@ -440,16 +504,16 @@ public class PartyManager {
 
         if (promoted != null) {
             Bukkit.getPluginManager().callEvent(
-                    new PartyLeaveEvent(party, player.getUniqueId(),
+                    new PartyLeaveEvent(party, uuid,
                             PartyLeaveEvent.Reason.LEFT_PROMOTED));
-            persistLeader(party);
+            persistLeader(party, promoted);
         } else {
             Bukkit.getPluginManager().callEvent(
-                    new PartyLeaveEvent(party, player.getUniqueId(),
+                    new PartyLeaveEvent(party, uuid,
                             PartyLeaveEvent.Reason.LEFT));
         }
 
-        persistMemberRemoval(party, player.getUniqueId());
+        persistMemberRemoval(party, uuid);
         return party;
     }
 
@@ -470,15 +534,19 @@ public class PartyManager {
     /**
      * Adds a player to a public party.
      *
-     * <p>The caller is responsible for checking that the party is
-     * public, that it is not full, and that the player is not already
-     * in a party. The join is persisted asynchronously.</p>
+     * <p>The party must still be active and public, must not be full,
+     * and the player must not already be in a party. The join is
+     * persisted asynchronously.</p>
      *
      * @param player the joining player
      * @param party  the party to join
      * @return {@code true} if the join succeeded
      */
     public boolean joinPublic(Player player, Party party) {
+        if (party == null) return false;
+        if (parties.get(party.getId()) != party) return false;
+        if (!party.isPublic()) return false;
+
         UUID uuid = player.getUniqueId();
         if (isInParty(uuid)) return false;
         if (party.size() >= Party.MAX_MEMBERS) return false;
@@ -491,12 +559,13 @@ public class PartyManager {
                 new PartyJoinEvent(party, uuid, party.getLeader()));
 
         if (database.isReady()) {
+            long partyId = party.getId();
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
                 try (Connection conn = database.getDataSource().getConnection();
                      PreparedStatement ps = conn.prepareStatement(
                              "INSERT INTO duels_party_members (party_id, uuid, joined_at) "
                                      + "VALUES (?, ?, ?)")) {
-                    ps.setLong(1, party.getId());
+                    ps.setLong(1, partyId);
                     ps.setString(2, uuid.toString());
                     ps.setTimestamp(3, Timestamp.from(now));
                     ps.executeUpdate();
@@ -517,11 +586,25 @@ public class PartyManager {
         return new ArrayList<>(parties.values());
     }
 
+    /**
+     * Disbands a party internally, clearing its members and pending
+     * invitations from the cache and removing the party itself.
+     *
+     * <p>The database row is deleted asynchronously; the cascading
+     * foreign keys on {@code duels_party_members} and
+     * {@code duels_party_invites} clean up the related rows in the
+     * database without an explicit statement.</p>
+     *
+     * @param party  the party to disband
+     * @param reason reason passed to the fired event
+     */
     private void disbandInternal(Party party, PartyLeaveEvent.Reason reason) {
+        long partyId = party.getId();
         for (UUID member : party.getMembers().keySet()) {
             playerToParty.remove(member);
         }
-        parties.remove(party.getId());
+        invitesByInvitee.values().removeIf(invite -> invite.partyId() == partyId);
+        parties.remove(partyId);
 
         Bukkit.getPluginManager().callEvent(new PartyDisbandEvent(party, reason));
 
@@ -530,75 +613,102 @@ public class PartyManager {
                 try (Connection conn = database.getDataSource().getConnection();
                      PreparedStatement ps = conn.prepareStatement(
                              "DELETE FROM duels_parties WHERE id = ?")) {
-                    ps.setLong(1, party.getId());
+                    ps.setLong(1, partyId);
                     ps.executeUpdate();
                 } catch (SQLException e) {
-                    Log.error(e, "Failed to disband party %d", party.getId());
+                    Log.error(e, "Failed to disband party %d", partyId);
                 }
             });
         }
     }
 
+    /**
+     * Persists the removal of a member from a party.
+     *
+     * @param party the party the member belonged to
+     * @param uuid  uuid of the removed member
+     */
     private void persistMemberRemoval(Party party, UUID uuid) {
         if (!database.isReady()) return;
+        long partyId = party.getId();
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try (Connection conn = database.getDataSource().getConnection();
                  PreparedStatement ps = conn.prepareStatement(
                          "DELETE FROM duels_party_members WHERE party_id = ? AND uuid = ?")) {
-                ps.setLong(1, party.getId());
+                ps.setLong(1, partyId);
                 ps.setString(2, uuid.toString());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                Log.error(e, "Failed to remove member %s from party %d", uuid, party.getId());
+                Log.error(e, "Failed to remove member %s from party %d", uuid, partyId);
             }
         });
     }
 
-    private void persistLeader(Party party) {
+    /**
+     * Persists the new leader of a party.
+     *
+     * <p>The new leader uuid is captured by the caller before the
+     * asynchronous task is scheduled, so the write always uses the
+     * value observed on the main thread.</p>
+     *
+     * @param party     the party whose leader changed
+     * @param newLeader uuid of the new leader
+     */
+    private void persistLeader(Party party, UUID newLeader) {
         if (!database.isReady()) return;
+        long partyId = party.getId();
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try (Connection conn = database.getDataSource().getConnection();
                  PreparedStatement ps = conn.prepareStatement(
                          "UPDATE duels_parties SET leader_uuid = ? WHERE id = ?")) {
-                ps.setString(1, party.getLeader().toString());
-                ps.setLong(2, party.getId());
+                ps.setString(1, newLeader.toString());
+                ps.setLong(2, partyId);
                 ps.executeUpdate();
             } catch (SQLException e) {
-                Log.error(e, "Failed to update leader of party %d", party.getId());
+                Log.error(e, "Failed to update leader of party %d", partyId);
             }
         });
     }
 
+    /**
+     * Starts the periodic sweeper that removes expired invitations
+     * from the in-memory cache.
+     *
+     * <p>The sweeper runs on the main thread so that the cache is only
+     * touched from a single thread; the database purge is delegated to
+     * an asynchronous task.</p>
+     */
     private void startInviteSweeper() {
-        sweepTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+        sweepTask = Bukkit.getScheduler().runTaskTimer(
                 plugin, this::sweepExpiredInvites,
                 INVITE_SWEEP_INTERVAL_TICKS, INVITE_SWEEP_INTERVAL_TICKS);
     }
 
+    /**
+     * Removes expired invitations from the cache and asynchronously
+     * purges them from the database.
+     *
+     * <p>The cache mutation happens on the main thread, so the call is
+     * safe with respect to concurrent updates performed by commands.
+     * The database delete uses a timestamp captured on the main thread,
+     * so new invitations inserted after this point are not affected.</p>
+     */
     private void sweepExpiredInvites() {
-        List<UUID> expired = new ArrayList<>();
         Instant now = Instant.now();
-        for (Map.Entry<UUID, PartyInvite> entry : invitesByInvitee.entrySet()) {
-            if (entry.getValue().expiresAt().isBefore(now)) {
-                expired.add(entry.getKey());
-            }
-        }
-        if (expired.isEmpty()) return;
+        boolean removed = invitesByInvitee.values()
+                .removeIf(invite -> invite.expiresAt().isBefore(now));
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            for (UUID uuid : expired) {
-                invitesByInvitee.remove(uuid);
+        if (!removed || !database.isReady()) return;
+
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = database.getDataSource().getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "DELETE FROM duels_party_invites WHERE expires_at < ?")) {
+                ps.setTimestamp(1, Timestamp.from(now));
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                Log.error(e, "Failed to purge expired party invites");
             }
         });
-
-        if (!database.isReady()) return;
-        try (Connection conn = database.getDataSource().getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "DELETE FROM duels_party_invites WHERE expires_at < ?")) {
-            ps.setTimestamp(1, Timestamp.from(now));
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            Log.error(e, "Failed to purge expired party invites");
-        }
     }
 }

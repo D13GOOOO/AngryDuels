@@ -27,11 +27,29 @@ import java.util.Map;
  */
 public final class KitEditorGui {
 
+    /**
+     * Total number of slots of the inventory.
+     */
     private static final int SIZE = 54;
+
+    /**
+     * Slot of the Save button.
+     */
     private static final int SAVE_SLOT = 49;
+
+    /**
+     * Slot of the Cancel button.
+     */
     private static final int CANCEL_SLOT = 50;
+
+    /**
+     * Highest slot that can host a kit item.
+     */
     private static final int MAX_EDITABLE_SLOT = 40;
 
+    /**
+     * Prevents instantiation.
+     */
     private KitEditorGui() {
     }
 
@@ -106,6 +124,11 @@ public final class KitEditorGui {
         return MAX_EDITABLE_SLOT;
     }
 
+    /**
+     * Builds the filler glass pane used for non-editable slots.
+     *
+     * @return a black glass pane with a blank name
+     */
     private static ItemStack makeFiller() {
         ItemStack pane = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta meta = pane.getItemMeta();
@@ -116,6 +139,13 @@ public final class KitEditorGui {
         return pane;
     }
 
+    /**
+     * Builds a labelled button.
+     *
+     * @param material button material
+     * @param label    MiniMessage label
+     * @return the built button
+     */
     private static ItemStack makeButton(Material material, String label) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();

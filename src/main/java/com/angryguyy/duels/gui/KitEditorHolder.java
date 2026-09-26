@@ -16,9 +16,19 @@ import java.util.UUID;
  */
 public class KitEditorHolder implements InventoryHolder {
 
+    /**
+     * Uuid of the editing player.
+     */
     private final UUID viewer;
+
+    /**
+     * Id of the kit being edited.
+     */
     private final String kitId;
 
+    /**
+     * Inventory instance attached to this holder.
+     */
     private Inventory inventory;
 
     /**

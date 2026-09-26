@@ -2,19 +2,22 @@ package com.angryguyy.duels.listener;
 
 import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.event.DuelEndEvent;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 
 /**
  * Forwards duel end events to the reward manager.
  *
- * <p>Keeping the forwarding logic in a dedicated listener means the
- * {@code DuelManager} does not need to know about rewards, and rewards
- * can be enabled, disabled or reloaded independently of the duel flow.
- * The listener itself is a no-op if rewards are disabled by config.</p>
+ * <p>The reward manager distributes rewards to every winning player
+ * individually, so team matches grant the same rewards to each member
+ * of the winning team.</p>
  */
 public class DuelRewardListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**
@@ -33,6 +36,8 @@ public class DuelRewardListener implements Listener {
      */
     @EventHandler
     public void onDuelEnd(DuelEndEvent event) {
-        plugin.rewards().grant(event);
+        for (Player winner : event.getWinners()) {
+            plugin.rewards().grant(event, winner);
+        }
     }
 }

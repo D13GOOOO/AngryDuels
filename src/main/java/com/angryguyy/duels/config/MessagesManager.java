@@ -28,14 +28,30 @@ import java.util.Map;
  * nickname or other user-controlled values.</p>
  *
  * <p>Instances are not thread-safe; all access must happen on the
- * Bukkit main thread.</p>
+ * Bukkit main thread. Callers running on an asynchronous thread — for
+ * example inside an {@code AsyncChatEvent} — must schedule the send
+ * through the Bukkit scheduler before invoking any method here.</p>
  */
 public class MessagesManager {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
+
+    /**
+     * Shared MiniMessage instance, safe to reuse across calls.
+     */
     private final MiniMessage mm = MiniMessage.miniMessage();
 
+    /**
+     * The loaded {@code messages.yml} content, replaced on reload.
+     */
     private YamlConfiguration messages;
+
+    /**
+     * Parsed prefix component, rebuilt on every reload.
+     */
     private Component prefix;
 
     /**

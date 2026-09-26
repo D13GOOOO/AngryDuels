@@ -16,6 +16,9 @@ import org.bukkit.event.player.PlayerJoinEvent;
  */
 public class PlayerJoinListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

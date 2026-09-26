@@ -9,6 +9,11 @@ import java.util.UUID;
 
 /**
  * Fired after a player has left a party.
+ *
+ * <p>Not cancellable: the leave has already been persisted by the time
+ * listeners receive the event. The {@link Reason} enum distinguishes
+ * between a voluntary leave, a kick, a promotion-triggering leave, and
+ * the automatic disband caused by the last member leaving.</p>
  */
 public class PartyLeaveEvent extends Event {
 
@@ -31,33 +36,82 @@ public class PartyLeaveEvent extends Event {
         this.reason = reason;
     }
 
-    public Party getParty() { return party; }
-    public UUID getPlayer() { return player; }
-    public Reason getReason() { return reason; }
+    /**
+     * Returns the party that was left.
+     *
+     * @return party
+     */
+    public Party getParty() {
+        return party;
+    }
 
+    /**
+     * Returns the uuid of the leaving player.
+     *
+     * @return player uuid
+     */
+    public UUID getPlayer() {
+        return player;
+    }
+
+    /**
+     * Returns the reason the player left.
+     *
+     * @return leave reason
+     */
+    public Reason getReason() {
+        return reason;
+    }
+
+    /**
+     * Returns the handler list for this event.
+     *
+     * @return handler list
+     */
     @Override
-    public @NotNull HandlerList getHandlers() { return HANDLERS; }
+    public @NotNull HandlerList getHandlers() {
+        return HANDLERS;
+    }
 
-    public static HandlerList getHandlerList() { return HANDLERS; }
+    /**
+     * Static accessor required by Bukkit's event dispatch system.
+     *
+     * @return handler list
+     */
+    public static HandlerList getHandlerList() {
+        return HANDLERS;
+    }
 
     /**
      * Why a player left a party.
      */
     public enum Reason {
 
-        /** The player used {@code /party leave}. */
+        /**
+         * The player used {@code /party leave}.
+         */
         LEFT,
 
-        /** The player used {@code /party leave} and a new leader was promoted. */
+        /**
+         * The player used {@code /party leave} and a new leader was
+         * automatically promoted among the remaining members.
+         */
         LEFT_PROMOTED,
 
-        /** The player was the last member and the party was disbanded. */
+        /**
+         * The player was the last member and the party was
+         * automatically disbanded as a consequence.
+         */
         LEFT_LAST,
 
-        /** The player was removed by the leader. */
+        /**
+         * The player was removed by the leader using the kick command.
+         */
         KICKED,
 
-        /** The leader disbanded the party explicitly. */
+        /**
+         * The leader disbanded the party explicitly.
+         */
         DISBANDED
     }
 }

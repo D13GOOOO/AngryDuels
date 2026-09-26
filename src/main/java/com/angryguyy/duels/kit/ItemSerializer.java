@@ -22,7 +22,7 @@ import java.util.Map;
  * <p>The serialization format used by kits is intentionally readable so
  * that administrators can edit {@code kits.yml} by hand. Only the
  * fields that are commonly needed are supported; exotic NBT must be
- * applied programmatically by a future kit editor.</p>
+ * applied programmatically.</p>
  *
  * <p>Recognized keys:</p>
  * <ul>

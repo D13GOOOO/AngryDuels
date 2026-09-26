@@ -1,10 +1,10 @@
 package com.angryguyy.duels.listener;
 
 import com.angryguyy.duels.DuelsPlugin;
+import com.angryguyy.duels.gui.LeaderboardGui;
 import com.angryguyy.duels.gui.LeaderboardGuiHolder;
 import com.angryguyy.duels.stats.LeaderboardCategory;
 import com.angryguyy.duels.stats.LeaderboardManager;
-import com.angryguyy.duels.gui.LeaderboardGui;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -18,9 +18,14 @@ import org.bukkit.inventory.InventoryHolder;
  * <p>All clicks and drags are cancelled. Navigation clicks on the
  * previous/next arrows change page and reopen the inventory; a click on
  * the compass cycles to the next category and resets the page to one.
+ * Clicks coming from a viewer other than the one the GUI was opened for
+ * are silently ignored.</p>
  */
 public class LeaderboardGuiListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

@@ -24,6 +24,9 @@ import java.io.File;
  */
 public class ConfigManager {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

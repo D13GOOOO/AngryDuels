@@ -23,15 +23,16 @@ import java.util.UUID;
 /**
  * Handler for the {@code /party} command and its subcommands.
  *
- * <p>Subcommands cover party lifecycle (create, disband, leave),
- * membership (invite, accept, deny, kick, transfer, list, info) and
- * social features (announce, public, join). Fight commands ({@code ffa}
- * and {@code split}) open the kit selection GUI directly, skipping the
- * mode selection step since the mode was already chosen by the
- * command.</p>
+ * <p>Subcommands cover party lifecycle, membership, social features and
+ * fight setup. Fight commands open the kit selection GUI, which then
+ * either starts an internal match or sends a challenge to another
+ * party.</p>
  */
 public class PartyCommand implements CommandExecutor, TabCompleter {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**
@@ -68,6 +69,7 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
             case "join" -> handleJoin(sender, args);
             case "ffa" -> handleFfa(sender);
             case "split" -> handleSplit(sender);
+            case "challenge" -> handleChallenge(sender, args);
             case "help" -> plugin.messages().send(sender, "party.help");
             default -> plugin.messages().send(sender, "party.help");
         }
@@ -78,6 +80,12 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     // Lifecycle
     // ------------------------------------------------------------
 
+    /**
+     * Creates a new party with the sender as leader and gives them the
+     * leader hotbar items.
+     *
+     * @param sender source of the command
+     */
     private void handleCreate(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -97,6 +105,11 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         plugin.messages().send(player, "party.created");
     }
 
+    /**
+     * Disbands the sender's party. Only the leader may do this.
+     *
+     * @param sender source of the command
+     */
     private void handleDisband(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -116,6 +129,16 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         plugin.messages().send(player, "party.disbanded");
     }
 
+    /**
+     * Makes the sender leave their party.
+     *
+     * <p>If the sender was the leader, the leader hotbar items are
+     * removed from them and given to the new leader, if any, so the
+     * party keeps a functional leader item bar after the automatic
+     * promotion performed by {@code PartyManager.leave}.</p>
+     *
+     * @param sender source of the command
+     */
     private void handleLeave(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -127,14 +150,25 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         }
 
         boolean wasLeader = party.isLeader(player.getUniqueId());
-        plugin.parties().leave(player);
+        Party after = plugin.parties().leave(player);
         plugin.messages().send(player, "party.left");
 
-        if (wasLeader) {
-            plugin.partyItems().removeItems(player);
+        if (!wasLeader) return;
+        plugin.partyItems().removeItems(player);
+        if (after == null) return;
+
+        Player newLeader = Bukkit.getPlayer(after.getLeader());
+        if (newLeader != null && newLeader.isOnline()) {
+            plugin.partyItems().giveItems(newLeader);
         }
     }
 
+    /**
+     * Transfers leadership to another online member.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the target player name
+     */
     private void handleTransfer(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -182,6 +216,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     // Invitations
     // ------------------------------------------------------------
 
+    /**
+     * Sends an invitation to another player. Only the leader may do
+     * this.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the target player name
+     */
     private void handleInvite(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -230,6 +271,11 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
                 Map.of("player", player.getName()));
     }
 
+    /**
+     * Accepts the sender's pending invitation and notifies the party.
+     *
+     * @param sender source of the command
+     */
     private void handleAccept(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -241,11 +287,16 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         }
 
         plugin.messages().send(player, "party.invite-accepted-self",
-                Map.of("player", party.getLeader().toString()));
+                Map.of("player", nameOf(party.getLeader())));
         broadcastToParty(party, "party.member-joined",
                 Map.of("player", player.getName()));
     }
 
+    /**
+     * Denies the sender's pending invitation.
+     *
+     * @param sender source of the command
+     */
     private void handleDeny(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -262,6 +313,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     // Membership
     // ------------------------------------------------------------
 
+    /**
+     * Kicks a member out of the sender's party. Only the leader may do
+     * this.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the target player name
+     */
     private void handleKick(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -298,9 +356,14 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
             plugin.partyItems().discardBackup(targetPlayer.getUniqueId());
         }
         plugin.messages().send(player, "party.kicked-other",
-                Map.of("player", args[1]));
+                Map.of("player", nameOf(target)));
     }
 
+    /**
+     * Lists the members of the sender's party with their online state.
+     *
+     * @param sender source of the command
+     */
     private void handleList(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -320,14 +383,18 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
             String name = Bukkit.getOfflinePlayer(uuid).getName();
             if (name == null) name = uuid.toString().substring(0, 8);
 
-            String roleKey = party.isLeader(uuid) ? "party.list-leader" : "party.list-member";
-            plugin.messages().send(player, roleKey, Map.of(
-                    "player", name,
-                    "status", online ? "<green>online" : "<red>offline"
-            ));
+            String role = party.isLeader(uuid) ? "leader" : "member";
+            String status = online ? "online" : "offline";
+            plugin.messages().send(player, "party.list-" + role + "-" + status,
+                    Map.of("player", name));
         }
     }
 
+    /**
+     * Shows a compact info line about the sender's party.
+     *
+     * @param sender source of the command
+     */
     private void handleInfo(CommandSender sender) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -350,6 +417,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     // Social
     // ------------------------------------------------------------
 
+    /**
+     * Broadcasts a message to every online member of the sender's
+     * party.
+     *
+     * @param sender source of the command
+     * @param args   joined into a single message
+     */
     private void handleAnnounce(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -369,6 +443,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
                 Map.of("player", player.getName(), "message", message));
     }
 
+    /**
+     * Toggles or sets the public flag of the sender's party. Only the
+     * leader may do this.
+     *
+     * @param sender source of the command
+     * @param args   optional {@code on|off|true|false}
+     */
     private void handlePublic(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -397,6 +478,12 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
                 ? "party.public-on" : "party.public-off");
     }
 
+    /**
+     * Joins a public party led by the named player.
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the leader's name
+     */
     private void handleJoin(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender);
         if (player == null) return;
@@ -446,10 +533,8 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     // ------------------------------------------------------------
 
     /**
-     * Opens the kit selection for a party FFA match.
-     *
-     * <p>Only the leader can start a party fight, and at least two
-     * members are required so that there is someone to fight.</p>
+     * Opens the kit selection GUI to start a party FFA. Only the leader
+     * may do this, and the party must have at least two members.
      *
      * @param sender source of the command
      */
@@ -475,11 +560,8 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Opens the kit selection for a party Split match.
-     *
-     * <p>Only the leader can start a party fight, and at least two
-     * members are required so that the party can be split into two
-     * teams. With exactly two members the split is 1v1.</p>
+     * Opens the kit selection GUI to start a party split. Only the
+     * leader may do this, and the party must have at least two members.
      *
      * @param sender source of the command
      */
@@ -504,10 +586,81 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         PartyFightKitGui.open(plugin, player, party.getId(), PartyMatchType.SPLIT);
     }
 
+    /**
+     * Opens the kit selection GUI to challenge another party.
+     *
+     * <p>The target argument must be the name of the leader of another
+     * party. Both parties are validated and the final click on a kit
+     * sends a duel request between the two teams.</p>
+     *
+     * @param sender source of the command
+     * @param args   {@code args[1]} is the target leader name
+     */
+    private void handleChallenge(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) return;
+        if (args.length < 2) {
+            plugin.messages().send(player, "party.challenge-usage");
+            return;
+        }
+
+        Party ownParty = plugin.parties().getParty(player.getUniqueId());
+        if (ownParty == null) {
+            plugin.messages().send(player, "party.not-in");
+            return;
+        }
+        if (!ownParty.isLeader(player.getUniqueId())) {
+            plugin.messages().send(player, "party.only-leader");
+            return;
+        }
+        if (ownParty.size() < 2) {
+            plugin.messages().send(player, "party.challenge-need-members");
+            return;
+        }
+
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null || !target.isOnline()) {
+            plugin.messages().send(player, "party.challenge-target-offline");
+            return;
+        }
+        if (target.getUniqueId().equals(player.getUniqueId())) {
+            plugin.messages().send(player, "party.challenge-self");
+            return;
+        }
+
+        Party targetParty = plugin.parties().getParty(target.getUniqueId());
+        if (targetParty == null) {
+            plugin.messages().send(player, "party.challenge-target-no-party");
+            return;
+        }
+        if (!targetParty.isLeader(target.getUniqueId())) {
+            plugin.messages().send(player, "party.challenge-target-not-leader");
+            return;
+        }
+        if (targetParty.getId() == ownParty.getId()) {
+            plugin.messages().send(player, "party.challenge-self");
+            return;
+        }
+        if (targetParty.size() < 2) {
+            plugin.messages().send(player, "party.challenge-target-need-members");
+            return;
+        }
+
+        PartyFightKitGui.open(plugin, player, ownParty.getId(),
+                PartyMatchType.FFA, target.getUniqueId());
+    }
+
     // ------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------
 
+    /**
+     * Resolves a command sender to a player, sending the standard
+     * player-only message when the sender is not a player.
+     *
+     * @param sender source of the command
+     * @return the player, or {@code null}
+     */
     private @Nullable Player requirePlayer(CommandSender sender) {
         if (!(sender instanceof Player p)) {
             plugin.messages().send(sender, "general.player-only");
@@ -516,6 +669,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         return p;
     }
 
+    /**
+     * Sends a message to every online member of a party.
+     *
+     * @param party        the party
+     * @param key          messages.yml key
+     * @param placeholders placeholder values
+     */
     private void broadcastToParty(Party party, String key, Map<String, String> placeholders) {
         for (UUID uuid : party.getMembers().keySet()) {
             Player p = Bukkit.getPlayer(uuid);
@@ -525,6 +685,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * Resolves an offline player name to a uuid, using the cache when
+     * the player is not online.
+     *
+     * @param name player name
+     * @return uuid, or {@code null} if unknown
+     */
     private @Nullable UUID resolveUuid(String name) {
         Player online = Bukkit.getPlayerExact(name);
         if (online != null) return online.getUniqueId();
@@ -532,6 +699,13 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
         return offline != null ? offline.getUniqueId() : null;
     }
 
+    /**
+     * Returns the last known name of a player, falling back to a
+     * shortened uuid when the name is unavailable.
+     *
+     * @param uuid player uuid
+     * @return display name
+     */
     private String nameOf(UUID uuid) {
         String name = Bukkit.getOfflinePlayer(uuid).getName();
         return name != null ? name : uuid.toString().substring(0, 8);
@@ -549,7 +723,8 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
             return java.util.stream.Stream.of(
                             "create", "disband", "invite", "accept", "deny",
                             "kick", "leave", "transfer", "list", "info",
-                            "announce", "public", "join", "ffa", "split", "help")
+                            "announce", "public", "join", "ffa", "split",
+                            "challenge", "help")
                     .filter(s -> s.startsWith(prefix))
                     .toList();
         }
@@ -558,7 +733,8 @@ public class PartyCommand implements CommandExecutor, TabCompleter {
             String sub = args[0].toLowerCase(Locale.ROOT);
             String prefix = args[1].toLowerCase(Locale.ROOT);
             if (sub.equals("invite") || sub.equals("kick")
-                    || sub.equals("transfer") || sub.equals("join")) {
+                    || sub.equals("transfer") || sub.equals("join")
+                    || sub.equals("challenge")) {
                 List<String> names = new ArrayList<>();
                 for (Player p : Bukkit.getOnlinePlayers()) {
                     if (sender instanceof Player sp && p.getUniqueId().equals(sp.getUniqueId())) continue;

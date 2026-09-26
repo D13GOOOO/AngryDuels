@@ -4,26 +4,26 @@ import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
  * Immutable value object describing a pending duel request.
  *
- * <p>A request is created when a player challenges another and is
- * stored in the {@link DuelManager} both as an outgoing entry for the
- * sender and an incoming entry for the target. It carries the optional
- * kit identifier that will be used if the duel is accepted, along with
- * the instant it was created and the configured timeout used to detect
- * expiry.</p>
+ * <p>A request always carries two teams. In a 1v1 each team has a
+ * single element; in a party match each team holds every member of the
+ * corresponding party at the moment the invitation was sent.</p>
  *
- * <p>Instances are thread-safe for reads since all fields are final
- * and immutable, but they are only ever accessed from the main thread
- * in practice.</p>
+ * <p>The request is stored in the {@link DuelManager} as one outgoing
+ * entry per member of team A and one incoming entry per member of team
+ * B, so any member can see the pending state. The accept action is
+ * performed by a single player, identified by convention as the first
+ * element of team B.</p>
  */
 public final class DuelRequest {
 
-    private final UUID sender;
-    private final UUID target;
+    private final List<UUID> teamA;
+    private final List<UUID> teamB;
     private final @Nullable String kitId;
     private final Instant createdAt;
     private final Duration timeout;
@@ -32,42 +32,75 @@ public final class DuelRequest {
      * Creates a new request and records its creation time as the
      * current instant.
      *
-     * @param sender  unique id of the player sending the request
-     * @param target  unique id of the player receiving the request
+     * @param teamA   uuids of the first team; must not be empty
+     * @param teamB   uuids of the second team; must not be empty
      * @param kitId   optional kit identifier, or {@code null}
      * @param timeout duration after which the request is considered
      *                expired
      */
-    public DuelRequest(UUID sender, UUID target, @Nullable String kitId, Duration timeout) {
-        this.sender = sender;
-        this.target = target;
+    public DuelRequest(List<UUID> teamA, List<UUID> teamB,
+                       @Nullable String kitId, Duration timeout) {
+        this.teamA = List.copyOf(teamA);
+        this.teamB = List.copyOf(teamB);
         this.kitId = kitId;
         this.createdAt = Instant.now();
         this.timeout = timeout;
     }
 
     /**
-     * Returns the unique id of the sender.
+     * Convenience constructor for a classic 1v1.
      *
-     * @return sender uuid
+     * @param sender  uuid of the sender
+     * @param target  uuid of the target
+     * @param kitId   optional kit identifier, or {@code null}
+     * @param timeout request timeout
      */
-    public UUID getSender() {
-        return sender;
+    public DuelRequest(UUID sender, UUID target, @Nullable String kitId, Duration timeout) {
+        this(List.of(sender), List.of(target), kitId, timeout);
     }
 
     /**
-     * Returns the unique id of the target.
+     * Returns the first team.
      *
-     * @return target uuid
+     * @return team A
+     */
+    public List<UUID> getTeamA() {
+        return teamA;
+    }
+
+    /**
+     * Returns the second team.
+     *
+     * @return team B
+     */
+    public List<UUID> getTeamB() {
+        return teamB;
+    }
+
+    /**
+     * Returns the representative of the sender side, used as primary
+     * recipient of the "sent" message.
+     *
+     * @return team A representative uuid
+     */
+    public UUID getSender() {
+        return teamA.get(0);
+    }
+
+    /**
+     * Returns the representative of the target side, used as the
+     * player who can accept or deny the request.
+     *
+     * @return team B representative uuid
      */
     public UUID getTarget() {
-        return target;
+        return teamB.get(0);
     }
 
     /**
      * Returns the optional kit identifier.
      *
-     * @return kit id, or {@code null} if the duel has no preset kit
+     * @return kit id, or {@code null}
      */
     public @Nullable String getKitId() {
         return kitId;
@@ -94,8 +127,7 @@ public final class DuelRequest {
     /**
      * Checks whether the request has exceeded its timeout.
      *
-     * @return {@code true} if the current time is past
-     *         {@code createdAt + timeout}
+     * @return {@code true} if the current time is past expiry
      */
     public boolean isExpired() {
         return Instant.now().isAfter(createdAt.plus(timeout));

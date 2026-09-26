@@ -18,6 +18,9 @@ import org.bukkit.event.player.PlayerQuitEvent;
  */
 public class PlayerQuitListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

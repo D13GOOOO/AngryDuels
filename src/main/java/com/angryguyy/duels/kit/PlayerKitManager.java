@@ -4,7 +4,7 @@ import com.angryguyy.duels.DuelsPlugin;
 import com.angryguyy.duels.stats.DatabaseManager;
 import com.angryguyy.duels.util.Log;
 import org.bukkit.Bukkit;
-import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.inventory.ItemStack;
 
 import java.sql.Connection;
@@ -12,7 +12,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -31,13 +33,14 @@ import java.util.UUID;
  * touches the database on the main thread.</p>
  *
  * <p>Writes go through the {@link DatabaseManager} connection pool on
- * an async thread. If the database is unavailable, the change is
- * queued for retry and the cache is still updated so that the current
- * session sees the new layout immediately.</p>
+ * an async thread. If the database is unavailable at the moment of a
+ * write, the operation is queued for retry by the database manager and
+ * the cache is still updated so that the current session sees the new
+ * layout immediately.</p>
  *
  * <p>If statistics are disabled in config, or the database is offline
  * at startup, the manager degrades gracefully: reads return the base
- * kit and writes are silently dropped after a warning.</p>
+ * kit and writes are logged and dropped.</p>
  */
 public class PlayerKitManager {
 
@@ -51,10 +54,10 @@ public class PlayerKitManager {
     private final Map<UUID, Map<String, Map<Integer, ItemStack>>> cache = new HashMap<>();
 
     /**
-     * Set of players whose layout has already been loaded, so we do not
+     * Players whose layout has already been loaded, so we do not
      * re-query the database on every join.
      */
-    private final Map<UUID, Boolean> loaded = new HashMap<>();
+    private final Set<UUID> loaded = new HashSet<>();
 
     /**
      * Creates a new player kit manager.
@@ -79,9 +82,7 @@ public class PlayerKitManager {
      */
     public void loadForPlayer(UUID uuid) {
         if (!database.isReady()) return;
-        if (loaded.containsKey(uuid)) return;
-
-        loaded.put(uuid, Boolean.TRUE);
+        if (!loaded.add(uuid)) return;
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             Map<String, Map<Integer, ItemStack>> kits = new HashMap<>();
@@ -165,10 +166,10 @@ public class PlayerKitManager {
      * Saves a personal layout for a kit.
      *
      * <p>The in-memory cache is updated immediately so the next duel
-     * uses the new layout. The database write is performed asynchronously
-     * in a single transaction: existing rows for the kit are deleted and
-     * the new ones are inserted. If the database is unavailable, the
-     * write is queued for retry.</p>
+     * uses the new layout. The database write is performed
+     * asynchronously in a single transaction: existing rows for the kit
+     * are deleted and the new ones are inserted. If the database is
+     * unavailable, the write is queued for retry.</p>
      *
      * @param uuid   player uuid
      * @param kitId  kit id
@@ -181,7 +182,7 @@ public class PlayerKitManager {
         synchronized (cache) {
             cache.computeIfAbsent(uuid, k -> new HashMap<>()).put(kitId, copy);
         }
-        loaded.put(uuid, Boolean.TRUE);
+        loaded.add(uuid);
 
         if (!database.isReady()) {
             Log.warn("Cannot persist kit layout for %s: database not ready.", uuid);
@@ -208,9 +209,14 @@ public class PlayerKitManager {
     /**
      * Persists a layout inside a single transaction.
      *
-     * <p>The player row is upserted first to satisfy the foreign key,
-     * then all previous rows for the kit are deleted and the new ones
-     * are inserted.</p>
+     * <p>The player row is upserted first so that editing a kit is enough
+     * to register the player in the stats subsystem, even before their
+     * first duel. All previous rows for the kit are then deleted and the
+     * new ones are inserted.</p>
+     *
+     * <p>Note that {@code duels_player_kits} carries no foreign key, so
+     * the upsert is purely defensive and not required to satisfy a
+     * constraint.</p>
      *
      * @param conn   active connection
      * @param uuid   player uuid
@@ -222,12 +228,15 @@ public class PlayerKitManager {
                                Map<Integer, ItemStack> layout) throws SQLException {
         conn.setAutoCommit(false);
         try {
+            OfflinePlayer offline = plugin.getServer().getOfflinePlayer(uuid);
+            String username = offline.getName() != null
+                    ? offline.getName()
+                    : uuid.toString().substring(0, 16);
+
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT IGNORE INTO duels_players (uuid, username) VALUES (?, ?)")) {
                 ps.setString(1, uuid.toString());
-                ps.setString(2, plugin.getServer().getOfflinePlayer(uuid).getName() != null
-                        ? plugin.getServer().getOfflinePlayer(uuid).getName()
-                        : uuid.toString().substring(0, 16));
+                ps.setString(2, username);
                 ps.executeUpdate();
             }
 

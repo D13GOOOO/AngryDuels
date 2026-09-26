@@ -36,12 +36,22 @@ import java.util.Locale;
  */
 public class DuelIsolationListener implements Listener {
 
+    /**
+     * Command names blocked while a duelist is in an active session.
+     *
+     * <p>The list covers common teleport, kit-reload, and ender-chest
+     * commands that would otherwise allow a player to escape the arena
+     * or alter their kit mid-fight.</p>
+     */
     private static final List<String> BLOCKED_COMMANDS = List.of(
             "tp", "teleport", "spawn", "home", "warp", "back",
             "tpa", "tpaccept", "tpyes", "tpdeny", "tpno",
             "kit", "kits", "ec", "enderchest", "pv", "playervault"
     );
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

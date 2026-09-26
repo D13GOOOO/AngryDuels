@@ -15,11 +15,17 @@ import org.jetbrains.annotations.NotNull;
  * captured, but <b>before</b> the players are teleported and the
  * countdown begins. It is cancellable: if any listener cancels the
  * event, the arena is released, the session is not registered, and
- * both players receive a cancellation message.</p>
+ * every participant receives a cancellation message.</p>
  *
  * <p>The event exposes the fully prepared {@link DuelSession} so that
  * listeners can inspect the assigned arena, the intended kit, or the
  * captured return locations before the fight is committed.</p>
+ *
+ * <p>{@link #getPlayerA()} and {@link #getPlayerB()} are convenience
+ * accessors that return the first member of each team, referred to as
+ * the team representative. To iterate over every participant, use
+ * {@link DuelSession#getAllPlayers()} on the session returned by
+ * {@link #getSession()}.</p>
  */
 public class DuelStartEvent extends Event implements Cancellable {
 
@@ -34,8 +40,8 @@ public class DuelStartEvent extends Event implements Cancellable {
      * Creates a new duel start event.
      *
      * @param session the prepared session
-     * @param playerA the first duelist
-     * @param playerB the second duelist
+     * @param playerA the representative of the first team
+     * @param playerB the representative of the second team
      */
     public DuelStartEvent(DuelSession session, Player playerA, Player playerB) {
         this.session = session;
@@ -53,7 +59,7 @@ public class DuelStartEvent extends Event implements Cancellable {
     }
 
     /**
-     * Returns the first duelist.
+     * Returns the representative of the first team.
      *
      * @return player A
      */
@@ -62,7 +68,7 @@ public class DuelStartEvent extends Event implements Cancellable {
     }
 
     /**
-     * Returns the second duelist.
+     * Returns the representative of the second team.
      *
      * @return player B
      */

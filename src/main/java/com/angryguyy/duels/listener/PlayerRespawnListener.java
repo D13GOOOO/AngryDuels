@@ -16,6 +16,9 @@ import org.bukkit.event.player.PlayerRespawnEvent;
  */
 public class PlayerRespawnListener implements Listener {
 
+    /**
+     * Owning plugin instance.
+     */
     private final DuelsPlugin plugin;
 
     /**

@@ -14,7 +14,8 @@ import java.util.UUID;
  * PlaceholderAPI expansion that exposes duel statistics and leaderboard
  * positions to other plugins.
  *
- * <p>Available identifiers:</p>
+ * <p>Placeholders are prefixed with {@code %angryduels_} and are
+ * resolved per-player. The available identifiers are:</p>
  * <ul>
  *     <li>{@code %angryduels_wins%} — total wins</li>
  *     <li>{@code %angryduels_losses%} — total losses</li>
@@ -49,33 +50,71 @@ public class AngryDuelsExpansion extends PlaceholderExpansion {
         this.plugin = plugin;
     }
 
+    /**
+     * Returns the identifier used before the first underscore in every
+     * placeholder, e.g. {@code angryduels} for {@code %angryduels_wins%}.
+     *
+     * @return expansion identifier
+     */
     @Override
     public @NotNull String getIdentifier() {
         return "angryduels";
     }
 
+    /**
+     * Returns the name of the expansion author.
+     *
+     * @return author name
+     */
     @Override
     public @NotNull String getAuthor() {
         return "angryguyy";
     }
 
+    /**
+     * Returns the version of the expansion, which mirrors the plugin
+     * version reported by Bukkit.
+     *
+     * @return plugin version
+     */
     @Override
     public @NotNull String getVersion() {
         return plugin.getPluginMeta().getVersion();
     }
 
+    /**
+     * Keeps the expansion registered across plugin reloads.
+     *
+     * @return always {@code true}
+     */
     @Override
     public boolean persist() {
         return true;
     }
 
+    /**
+     * Resolves a placeholder request.
+     *
+     * <p>The method first handles the special {@code rank_wins} key,
+     * which is served from the cached leaderboard, then falls back to
+     * the database-backed stats snapshot for every other identifier.</p>
+     *
+     * @param player the player the placeholder refers to; may be
+     *               {@code null} when the placeholder has no attached
+     *               player context
+     * @param params the identifier part following the expansion prefix,
+     *               already lowercased by the caller
+     * @return the resolved value, an empty string when the value cannot
+     *         be determined, or {@code null} when the identifier is
+     *         unknown
+     */
     @Override
     public String onRequest(OfflinePlayer player, @NotNull String params) {
         if (player == null || player.getUniqueId() == null) return "";
 
         String key = params.toLowerCase(Locale.ROOT);
 
-        if (key.equals("rank_wins")) {
+        if ("rank_wins".equals(key)) {
             return String.valueOf(findRank(player.getUniqueId(), LeaderboardCategory.WINS));
         }
 

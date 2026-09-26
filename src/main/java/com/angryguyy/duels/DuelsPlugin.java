@@ -23,10 +23,11 @@ import com.angryguyy.duels.listener.PlayerQuitListener;
 import com.angryguyy.duels.listener.PlayerRespawnListener;
 import com.angryguyy.duels.party.PartyManager;
 import com.angryguyy.duels.party.item.PartyItemManager;
-import com.angryguyy.duels.party.match.PartyMatchSetupManager;
 import com.angryguyy.duels.reward.RewardManager;
 import com.angryguyy.duels.snapshot.PlayerSnapshot;
 import com.angryguyy.duels.snapshot.SnapshotManager;
+import com.angryguyy.duels.spectator.SpectatorListener;
+import com.angryguyy.duels.spectator.SpectatorManager;
 import com.angryguyy.duels.stats.DatabaseManager;
 import com.angryguyy.duels.stats.LeaderboardManager;
 import com.angryguyy.duels.stats.StatsManager;
@@ -44,41 +45,103 @@ import org.bukkit.plugin.java.JavaPlugin;
  * lifecycle: creating managers in dependency order during
  * {@code onEnable}, wiring up commands and listeners, and tearing
  * everything down on {@code onDisable}.</p>
+ *
+ * <p>Every subsystem is exposed through a getter returning the concrete
+ * manager type. The getters are intentionally not null-checked during
+ * runtime: they are only valid after {@code onEnable} has created the
+ * corresponding manager, which is the case for every consumer in the
+ * plugin.</p>
  */
 public final class DuelsPlugin extends JavaPlugin {
 
+    /**
+     * Static instance used by {@link Log} and other classes that
+     * cannot receive the plugin through dependency injection.
+     */
     private static DuelsPlugin instance;
 
+    /**
+     * Typed accessor for {@code config.yml}.
+     */
     private ConfigManager configManager;
+
+    /**
+     * Loader and renderer for {@code messages.yml}.
+     */
     private MessagesManager messagesManager;
+
+    /**
+     * Owner of the dedicated duel world.
+     */
     private DuelWorldManager worldManager;
+
+    /**
+     * Central coordinator for duels and requests.
+     */
     private DuelManager duelManager;
+
+    /**
+     * Registry of duel arenas.
+     */
     private ArenaManager arenaManager;
+
+    /**
+     * Player state snapshots captured before duels.
+     */
     private SnapshotManager snapshotManager;
+
+    /**
+     * Registry of kit definitions.
+     */
     private KitManager kitManager;
+
+    /**
+     * Per-player kit layout overrides.
+     */
     private PlayerKitManager playerKitManager;
+
+    /**
+     * Reward dispatcher for winners.
+     */
     private RewardManager rewardManager;
+
+    /**
+     * MySQL pool, schema bootstrap and retry queue.
+     */
     private DatabaseManager databaseManager;
+
+    /**
+     * Read and write access to duel statistics.
+     */
     private StatsManager statsManager;
+
+    /**
+     * Cached leaderboard snapshots per category.
+     */
     private LeaderboardManager leaderboardManager;
+
+    /**
+     * Persistent parties and invitations.
+     */
     private PartyManager partyManager;
+
+    /**
+     * Hotbar items given to party leaders.
+     */
     private PartyItemManager partyItemManager;
-    private PartyMatchSetupManager partyMatchSetupManager;
+
+    /**
+     * Spectator mode for active duels.
+     */
+    private SpectatorManager spectatorManager;
 
     /**
      * Called by the server when the plugin is enabled.
      *
-     * <p>Instantiates all managers in dependency order, loads persisted
-     * snapshots and kits, registers commands and listeners, and logs a
-     * startup banner. Managers that depend on the database pool are
-     * initialized only after {@link DatabaseManager#init()} has run, so
-     * they can safely capture a reference to the pool even when the
-     * database is currently offline.</p>
-     *
-     * <p>The {@link PlayerSnapshot} class is registered with the
-     * configuration serialization system before any snapshot is loaded,
-     * so that pending snapshots on disk can be deserialized correctly
-     * at startup.</p>
+     * <p>Managers are created in dependency order. The database is
+     * initialized after the world, arenas, kits and rewards, and the
+     * duel and spectator managers are created last because they depend
+     * on the snapshot manager.</p>
      */
     @Override
     public void onEnable() {
@@ -107,7 +170,6 @@ public final class DuelsPlugin extends JavaPlugin {
         this.partyManager = new PartyManager(this, databaseManager);
         partyManager.load();
         this.partyItemManager = new PartyItemManager(partyManager);
-        this.partyMatchSetupManager = new PartyMatchSetupManager();
 
         this.snapshotManager = new SnapshotManager(this);
         snapshotManager.loadAll();
@@ -119,6 +181,9 @@ public final class DuelsPlugin extends JavaPlugin {
 
         this.duelManager = new DuelManager(this);
         duelManager.start();
+
+        this.spectatorManager = new SpectatorManager(this);
+        spectatorManager.start();
 
         registerCommands();
         registerListeners();
@@ -133,16 +198,17 @@ public final class DuelsPlugin extends JavaPlugin {
     /**
      * Called by the server when the plugin is disabled.
      *
-     * <p>Shuts down the managers that hold external resources in
-     * reverse initialization order: the leaderboard refresh task, the
-     * party and player kit caches, the database pool, and any active
-     * duel session. The order matters because the database pool must be
-     * closed only after every consumer has stopped using it.</p>
+     * <p>Subsystems are torn down in reverse dependency order: the
+     * spectator and duel managers are stopped before the database pool
+     * is closed, so that any session still active can release arenas
+     * and restore snapshots without touching the connection pool. The
+     * static instance is cleared at the end so that late calls through
+     * {@link Log} fall back to the server logger.</p>
      */
     @Override
     public void onDisable() {
+        if (spectatorManager != null) spectatorManager.shutdown();
         if (leaderboardManager != null) leaderboardManager.shutdown();
-        if (partyMatchSetupManager != null) partyMatchSetupManager.shutdown();
         if (partyItemManager != null) partyItemManager.shutdown();
         if (partyManager != null) partyManager.shutdown();
         if (playerKitManager != null) playerKitManager.shutdown();
@@ -191,22 +257,150 @@ public final class DuelsPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DuelStatsListener(this), this);
         getServer().getPluginManager().registerEvents(new PartyItemListener(this), this);
         getServer().getPluginManager().registerEvents(new PartyGuiListener(this), this);
+        getServer().getPluginManager().registerEvents(new SpectatorListener(this), this);
     }
 
-    public static DuelsPlugin getInstance() { return instance; }
-    public ConfigManager config() { return configManager; }
-    public MessagesManager messages() { return messagesManager; }
-    public DuelWorldManager worlds() { return worldManager; }
-    public DuelManager duels() { return duelManager; }
-    public ArenaManager arenas() { return arenaManager; }
-    public SnapshotManager snapshots() { return snapshotManager; }
-    public KitManager kits() { return kitManager; }
-    public PlayerKitManager playerKits() { return playerKitManager; }
-    public RewardManager rewards() { return rewardManager; }
-    public StatsManager stats() { return statsManager; }
-    public DatabaseManager database() { return databaseManager; }
-    public LeaderboardManager leaderboards() { return leaderboardManager; }
-    public PartyManager parties() { return partyManager; }
-    public PartyItemManager partyItems() { return partyItemManager; }
-    public PartyMatchSetupManager partyMatchSetups() { return partyMatchSetupManager; }
+    /**
+     * Returns the static plugin instance.
+     *
+     * @return instance, or {@code null} when the plugin is not enabled
+     */
+    public static DuelsPlugin getInstance() {
+        return instance;
+    }
+
+    /**
+     * Returns the config manager.
+     *
+     * @return config manager
+     */
+    public ConfigManager config() {
+        return configManager;
+    }
+
+    /**
+     * Returns the messages manager.
+     *
+     * @return messages manager
+     */
+    public MessagesManager messages() {
+        return messagesManager;
+    }
+
+    /**
+     * Returns the duel world manager.
+     *
+     * @return world manager
+     */
+    public DuelWorldManager worlds() {
+        return worldManager;
+    }
+
+    /**
+     * Returns the duel manager.
+     *
+     * @return duel manager
+     */
+    public DuelManager duels() {
+        return duelManager;
+    }
+
+    /**
+     * Returns the arena manager.
+     *
+     * @return arena manager
+     */
+    public ArenaManager arenas() {
+        return arenaManager;
+    }
+
+    /**
+     * Returns the snapshot manager.
+     *
+     * @return snapshot manager
+     */
+    public SnapshotManager snapshots() {
+        return snapshotManager;
+    }
+
+    /**
+     * Returns the kit manager.
+     *
+     * @return kit manager
+     */
+    public KitManager kits() {
+        return kitManager;
+    }
+
+    /**
+     * Returns the player kit manager.
+     *
+     * @return player kit manager
+     */
+    public PlayerKitManager playerKits() {
+        return playerKitManager;
+    }
+
+    /**
+     * Returns the reward manager.
+     *
+     * @return reward manager
+     */
+    public RewardManager rewards() {
+        return rewardManager;
+    }
+
+    /**
+     * Returns the stats manager.
+     *
+     * @return stats manager
+     */
+    public StatsManager stats() {
+        return statsManager;
+    }
+
+    /**
+     * Returns the database manager.
+     *
+     * @return database manager
+     */
+    public DatabaseManager database() {
+        return databaseManager;
+    }
+
+    /**
+     * Returns the leaderboard manager.
+     *
+     * @return leaderboard manager
+     */
+    public LeaderboardManager leaderboards() {
+        return leaderboardManager;
+    }
+
+    /**
+     * Returns the party manager.
+     *
+     * @return party manager
+     */
+    public PartyManager parties() {
+        return partyManager;
+    }
+
+    /**
+     * Returns the party item manager.
+     *
+     * @return party item manager
+     */
+    public PartyItemManager partyItems() {
+        return partyItemManager;
+    }
+
+    /**
+     * Returns the spectator manager.
+     *
+     * @return spectator manager
+     */
+    public SpectatorManager spectators() {
+        return spectatorManager;
+    }
 }

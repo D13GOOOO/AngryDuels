@@ -35,9 +35,19 @@ import java.util.Map;
  */
 public final class KitSelectionGui {
 
+    /**
+     * Total number of slots of the inventory.
+     */
     private static final int SIZE = 27;
+
+    /**
+     * Slots that can host a kit icon, in visual order.
+     */
     private static final int[] KIT_SLOTS = {10, 11, 12, 13, 14, 15, 16};
 
+    /**
+     * Prevents instantiation.
+     */
     private KitSelectionGui() {
     }
 

@@ -16,10 +16,24 @@ import java.util.UUID;
  */
 public class LeaderboardGuiHolder implements InventoryHolder {
 
+    /**
+     * Uuid of the viewer.
+     */
     private final UUID viewer;
+
+    /**
+     * Category currently displayed.
+     */
     private final LeaderboardCategory category;
+
+    /**
+     * Current page number, one-based.
+     */
     private final int page;
 
+    /**
+     * Inventory instance attached to this holder.
+     */
     private Inventory inventory;
 
     /**

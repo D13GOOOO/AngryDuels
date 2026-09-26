@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Immutable definition of a kit.
@@ -27,11 +28,11 @@ import java.util.Map;
  * </ul>
  *
  * <p>Preserving the slot of every item is a core design requirement:
- * the future in-game kit editor will let players move items between
- * slots, and the order in which items are shown and applied must match
- * the order stored in the config file exactly. The backing map is a
- * {@link java.util.TreeMap} so iteration is always ordered by ascending
- * slot index.</p>
+ * the in-game kit editor lets players move items between slots, and
+ * the order in which items are shown and applied must match the order
+ * stored in the config file exactly. The backing map is a
+ * {@link TreeMap}, so iteration is always ordered by ascending slot
+ * index regardless of the map passed to the constructor.</p>
  *
  * <p>Each kit also carries a display icon used by the selection GUI.
  * The icon is a standalone {@link ItemStack} built from the
@@ -55,6 +56,10 @@ public class Kit {
     /**
      * Creates a new kit definition.
      *
+     * <p>The item map is copied into a new {@link TreeMap} so that the
+     * kit is independent of the map passed by the caller and its
+     * iteration order is guaranteed to be slot-ascending.</p>
+     *
      * @param id          unique identifier of the kit
      * @param displayName human-readable name used in messages
      * @param permission  permission node required to use the kit
@@ -68,7 +73,7 @@ public class Kit {
         this.displayName = displayName;
         this.permission = permission;
         this.aliases = List.copyOf(aliases);
-        this.items = Collections.unmodifiableMap(items);
+        this.items = Collections.unmodifiableMap(new TreeMap<>(items));
         this.icon = icon;
     }
 
